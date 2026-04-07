@@ -39,8 +39,9 @@ providers:
     # Token is cached at ~/.bigbrain/github_token.json — no env var needed.
     base_url: "https://api.githubcopilot.com"
     default_model: "claude-opus-4.6"
-    timeout: 60
-    max_retries: 3
+    timeout: 240
+    max_retries: 5
+    retry_delay: 5.0
 
 # Ingestion settings (Phase 1)
 ingestion:
@@ -55,11 +56,15 @@ ingestion:
   py_extract_docstrings: true
   py_extract_symbols: true
 
-# Distillation settings (Phase 4+)
+# Distillation settings (Phase 4)
 distillation:
-  # chunking_strategy: sliding_window
-  # chunk_size: 1000
-  # overlap: 200
+  chunk_strategy: by_section     # by_section | sliding_window | by_paragraph
+  chunk_size: 1000               # max chars per chunk (sliding_window)
+  chunk_overlap: 200             # overlap between chunks (sliding_window)
+  summary_max_length: 500        # max words for summaries
+  entity_extraction: true
+  relationship_extraction: true
+  max_chunks_per_doc: 50
 
 # Knowledge Base settings (Phase 2)
 kb:

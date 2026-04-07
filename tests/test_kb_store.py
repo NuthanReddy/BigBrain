@@ -482,7 +482,7 @@ class TestEdgeCases:
             conn = sqlite3.connect(str(db))
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             conn.close()
-            assert version == 1
+            assert version == 3
 
     def test_foreign_keys_enabled(self, tmp_path: Path):
         db = tmp_path / "test.db"

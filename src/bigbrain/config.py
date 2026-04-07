@@ -59,6 +59,18 @@ class KBConfig:
 
 
 @dataclass
+class DistillConfig:
+    """Configuration for the distillation pipeline."""
+    chunk_strategy: str = "by_section"  # "by_section", "sliding_window", "by_paragraph"
+    chunk_size: int = 1000  # max characters per chunk (for sliding_window)
+    chunk_overlap: int = 200  # overlap between chunks (for sliding_window)
+    summary_max_length: int = 500  # max words for summaries
+    entity_extraction: bool = True
+    relationship_extraction: bool = True
+    max_chunks_per_doc: int = 50  # safety limit
+
+
+@dataclass
 class BigBrainConfig:
     """Central configuration object for the BigBrain application."""
 
@@ -81,8 +93,8 @@ class BigBrainConfig:
     # ingestion
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
 
-    # distillation (reserved)
-    distillation: dict = field(default_factory=dict)
+    # distillation
+    distillation: DistillConfig = field(default_factory=DistillConfig)
 
     # kb
     kb: KBConfig = field(default_factory=KBConfig)
@@ -113,7 +125,7 @@ _YAML_FIELD_MAP: dict[str, str] = {
 }
 
 # Sections that map 1-to-1 to dict fields on the dataclass.
-_YAML_DICT_SECTIONS = ("distillation",)
+_YAML_DICT_SECTIONS = ("providers",)
 
 
 def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
@@ -156,6 +168,19 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
         flat["kb"] = KBConfig(**{
             **{f.name: getattr(kb_defaults, f.name) for f in fields(KBConfig)},
             **kb_kwargs,
+        })
+
+    # Special handling for distillation → DistillConfig
+    if "distillation" in yaml_data and isinstance(yaml_data["distillation"], dict):
+        dist_data = yaml_data["distillation"]
+        dist_defaults = DistillConfig()
+        dist_kwargs = {}
+        for dist_field in fields(DistillConfig):
+            if dist_field.name in dist_data:
+                dist_kwargs[dist_field.name] = dist_data[dist_field.name]
+        flat["distillation"] = DistillConfig(**{
+            **{f.name: getattr(dist_defaults, f.name) for f in fields(DistillConfig)},
+            **dist_kwargs,
         })
 
     # Special handling for providers → ProviderConfig
@@ -246,6 +271,7 @@ _ENV_PREFIX = "BIGBRAIN_"
 _INGESTION_ENV_PREFIX = "BIGBRAIN_INGESTION_"
 _KB_ENV_PREFIX = "BIGBRAIN_KB_"
 _PROVIDERS_ENV_PREFIX = "BIGBRAIN_PROVIDERS_"
+_DISTILL_ENV_PREFIX = "BIGBRAIN_DISTILL_"
 
 # Fields whose env values should be interpreted as booleans.
 _BOOL_FIELDS: set[str] = {f.name for f in fields(BigBrainConfig) if f.type == "bool"}
@@ -266,6 +292,15 @@ _INGESTION_LIST_FIELDS: set[str] = {
 
 # KBConfig field metadata
 _KB_VALID_FIELDS: set[str] = {f.name for f in fields(KBConfig)}
+
+# DistillConfig field metadata for type coercion
+_DISTILL_VALID_FIELDS: set[str] = {f.name for f in fields(DistillConfig)}
+_DISTILL_BOOL_FIELDS: set[str] = {
+    f.name for f in fields(DistillConfig) if f.type == "bool"
+}
+_DISTILL_INT_FIELDS: set[str] = {
+    f.name for f in fields(DistillConfig) if f.type == "int"
+}
 
 
 def _coerce_bool(value: str) -> bool:
@@ -308,6 +343,7 @@ def load_env_overrides() -> dict[str, Any]:
     ingestion_overrides: dict[str, Any] = {}
     kb_overrides: dict[str, Any] = {}
     providers_overrides: dict[str, Any] = {}
+    distill_overrides: dict[str, Any] = {}
 
     for key, value in os.environ.items():
         if not key.startswith(_ENV_PREFIX):
@@ -345,6 +381,19 @@ def load_env_overrides() -> dict[str, Any]:
             kb_overrides[kb_field] = value
             continue
 
+        # Check for BIGBRAIN_DISTILL_*
+        if key.startswith(_DISTILL_ENV_PREFIX):
+            dist_field = key[len(_DISTILL_ENV_PREFIX):].lower()
+            if dist_field not in _DISTILL_VALID_FIELDS:
+                continue
+            if dist_field in _DISTILL_BOOL_FIELDS:
+                distill_overrides[dist_field] = _coerce_bool(value)
+            elif dist_field in _DISTILL_INT_FIELDS:
+                distill_overrides[dist_field] = int(value)
+            else:
+                distill_overrides[dist_field] = value
+            continue
+
         # Top-level BIGBRAIN_* fields
         field_name = key[len(_ENV_PREFIX):].lower()
         if field_name not in _VALID_FIELD_NAMES:
@@ -360,6 +409,8 @@ def load_env_overrides() -> dict[str, Any]:
         overrides["kb"] = kb_overrides
     if providers_overrides:
         overrides["providers"] = providers_overrides
+    if distill_overrides:
+        overrides["distillation"] = distill_overrides
 
     return overrides
 
@@ -425,6 +476,20 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["kb"] = KBConfig(**kb_kwargs)
             elif "kb" in yaml_values:
                 merged["kb"] = base_kb
+            # else: dataclass default is used automatically
+        elif f.name == "distillation":
+            # Special merge: defaults → YAML → env (field-level)
+            base_dist = yaml_values.get("distillation", DistillConfig())
+            env_dist = env_values.get("distillation")
+            if env_dist:
+                dist_kwargs = {
+                    fld.name: getattr(base_dist, fld.name)
+                    for fld in fields(DistillConfig)
+                }
+                dist_kwargs.update(env_dist)
+                merged["distillation"] = DistillConfig(**dist_kwargs)
+            elif "distillation" in yaml_values:
+                merged["distillation"] = base_dist
             # else: dataclass default is used automatically
         elif f.name == "providers":
             # Special merge: defaults → YAML → env (field-level)

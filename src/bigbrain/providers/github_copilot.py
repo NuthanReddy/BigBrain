@@ -117,35 +117,44 @@ class GitHubCopilotProvider(BaseProvider):
                     timeout=self._timeout,
                 )
 
-                # Permanent auth errors — do not retry
+                # Handle 400 errors
                 if resp.status_code == 400:
                     body = resp.text[:500]
+                    # Permanent: classic PAT rejection
                     if "Personal Access Token" in body:
                         raise ProviderError(
                             "github_copilot",
                             "Classic PATs are not supported. "
                             "Run 'bigbrain auth login' to authenticate via GitHub device flow.",
                         )
-                    logger.warning("GitHub Copilot 400 response: %s", body)
-                    raise ProviderError("github_copilot", f"Bad request: {body}")
+                    # Transient: model_not_supported, capacity errors — retry
+                    logger.warning(
+                        "GitHub Copilot 400 (attempt %d/%d): %s",
+                        attempt, self._max_retries, body,
+                    )
+                    last_exc = ProviderError("github_copilot", f"Bad request: {body}")
+                    if attempt < self._max_retries:
+                        time.sleep(self._retry_delay)
+                        continue
+                    raise last_exc
 
-                # Rate limit handling
-                if resp.status_code == 429:
+                # Rate limit handling (429 or 403 quota exceeded)
+                if resp.status_code in (429, 403):
                     retry_after = float(
-                        resp.headers.get("Retry-After", self._retry_delay)
+                        resp.headers.get("Retry-After", max(self._retry_delay * attempt, 5))
                     )
                     logger.warning(
-                        "GitHub Copilot rate limited, retry after %.1fs (attempt %d/%d)",
-                        retry_after,
-                        attempt,
-                        self._max_retries,
+                        "GitHub Copilot %d (attempt %d/%d), retry after %.1fs",
+                        resp.status_code, attempt, self._max_retries, retry_after,
+                    )
+                    last_exc = ProviderError(
+                        "github_copilot",
+                        f"Rate limited ({resp.status_code}) after {self._max_retries} retries",
                     )
                     if attempt < self._max_retries:
                         time.sleep(retry_after)
                         continue
-                    raise ProviderError(
-                        "github_copilot", "Rate limited after all retries"
-                    )
+                    raise last_exc
 
                 resp.raise_for_status()
                 data = resp.json()

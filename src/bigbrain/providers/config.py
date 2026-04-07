@@ -30,12 +30,12 @@ class GitHubCopilotConfig:
     """Configuration for the GitHub Copilot provider."""
 
     enabled: bool = False
-    api_token: str = ""  # GitHub personal access token; also reads GITHUB_TOKEN env var
+    api_token: str = ""
     base_url: str = "https://api.githubcopilot.com"
     default_model: str = "gpt-4o"
     timeout: int = 60
-    max_retries: int = 3
-    retry_delay: float = 1.0  # seconds between retries
+    max_retries: int = 5
+    retry_delay: float = 2.0  # base seconds between retries (exponential backoff)
 
 
 @dataclass

@@ -13,6 +13,12 @@ src/bigbrain.egg-info/requires.txt
 src/bigbrain.egg-info/top_level.txt
 src/bigbrain/compile/__init__.py
 src/bigbrain/distill/__init__.py
+src/bigbrain/distill/chunker.py
+src/bigbrain/distill/entities.py
+src/bigbrain/distill/models.py
+src/bigbrain/distill/pipeline.py
+src/bigbrain/distill/relationships.py
+src/bigbrain/distill/summarizer.py
 src/bigbrain/ingest/__init__.py
 src/bigbrain/ingest/discovery.py
 src/bigbrain/ingest/markdown_ingester.py
@@ -40,6 +46,7 @@ src/bigbrain/rag/pipeline.py
 src/bigbrain/rag/prompts.py
 src/bigbrain/rag/retriever.py
 tests/test_config.py
+tests/test_distill.py
 tests/test_errors.py
 tests/test_kb_service.py
 tests/test_kb_store.py

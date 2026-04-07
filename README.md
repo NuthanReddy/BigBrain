@@ -31,7 +31,10 @@ python main.py --help
 | `bigbrain providers` | Show AI provider status and availability                 | 3 ✅   |
 | `bigbrain auth`      | Manage GitHub Copilot authentication (login/logout)      | 3 ✅   |
 | `bigbrain ask`       | Ask a question using KB context + AI (RAG)               | 3 ✅   |
-| `bigbrain distill`   | Distill content into summaries, entities, relationships  | 4      |
+| `bigbrain distill`   | Distill content into summaries, entities, relationships  | 4 ✅   |
+| `bigbrain distill-show` | Show distilled output (summaries, entities, relationships) | 4 ✅ |
+| `bigbrain entities`  | List entities with type/search filters                   | 4 ✅   |
+| `bigbrain compact`   | Deduplicate entities, optimize KB                        | 4 ✅   |
 | `bigbrain compile`   | Compile knowledge base into output formats               | 5      |
 | `bigbrain update`    | Run incremental update on changed sources                | 7      |
 
@@ -212,6 +215,60 @@ python main.py providers --models
 python main.py auth logout
 ```
 
+## Distillation (Phase 4)
+
+AI-powered content analysis: chunking, summarization, entity extraction, and relationship building.
+
+### Usage
+
+```bash
+# Distill all KB documents (incremental — skips unchanged chunks)
+bigbrain distill
+
+# Re-distill everything from scratch
+bigbrain distill --force
+
+# Distill only a specific step
+bigbrain distill --step summarize
+bigbrain distill --step entities
+bigbrain distill --step relationships
+
+# Use a specific model
+bigbrain distill --model claude-opus-4.6
+
+# Parallel workers for multi-doc distillation
+bigbrain distill --workers 3
+```
+
+### Viewing Results
+
+```bash
+# Show distilled summaries, entities, and relationships
+bigbrain distill-show
+
+# List entities with filters
+bigbrain entities --types                # Show entity type counts
+bigbrain entities --type algorithm       # Filter by type
+bigbrain entities --search "binary"      # Search by name
+
+# Deduplicate entities
+bigbrain compact
+```
+
+### Distillation Configuration
+
+```yaml
+# config/example.yaml
+distillation:
+  chunk_strategy: by_section     # by_section | sliding_window | by_paragraph
+  chunk_size: 1000               # max chars per chunk (sliding_window)
+  chunk_overlap: 200             # overlap between chunks
+  summary_max_length: 500        # max words for summaries
+  entity_extraction: true
+  relationship_extraction: true
+  max_chunks_per_doc: 50
+```
+
 ## Configuration
 
 1. Copy `config/example.yaml` and customize for your environment.
@@ -265,7 +322,13 @@ BigBrain/
 │   │   ├── github_copilot.py  # GitHub Copilot OpenAI-compatible client
 │   │   └── github_auth.py     # GitHub token discovery and authentication
 │   ├── orchestrator/      # Pipeline orchestration (future)
-│   ├── distill/           # Content distillation (future)
+│   ├── distill/           # Content distillation (Phase 4 ✅)
+│   │   ├── models.py      # Chunk, Summary, Entity, Relationship
+│   │   ├── chunker.py     # Chunking strategies (section, sliding window, paragraph)
+│   │   ├── summarizer.py  # AI-powered summarization
+│   │   ├── entities.py    # AI entity extraction
+│   │   ├── relationships.py # AI relationship building
+│   │   └── pipeline.py    # DistillPipeline orchestrator
 │   └── compile/           # Output compilation (future)
 ├── tests/                 # Test suite
 │   ├── ingest/            # Ingestion pipeline tests
@@ -310,7 +373,7 @@ python -m pytest tests/ingest/test_pdf_ingester.py -v
 | 1     | File ingestion (local files into raw store)  ✅   |
 | 2     | Knowledge base storage and status reporting  ✅   |
 | 3     | AI provider integration (Ollama, LM Studio, GitHub Copilot)  ✅   |
-| 4     | Content distillation (summaries, entities)        |
+| 4     | Content distillation (summaries, entities)   ✅   |
 | 5     | Knowledge compilation into output formats         |
 | 6     | Relationship extraction and knowledge graph       |
 | 7     | Incremental updates and knowledge base search     |

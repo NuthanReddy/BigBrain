@@ -105,8 +105,113 @@ def _handle_ingest(args: argparse.Namespace) -> int:
 
 
 def _handle_distill(args: argparse.Namespace) -> int:
-    print("⚠ 'distill' is not implemented yet. This command will be available in Phase 2.")
+    """Run the distillation pipeline on stored documents."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty (no database found).")
+        print("  Run 'bigbrain ingest --source <path>' first.")
+        return 1
+
+    from bigbrain.distill.pipeline import DistillPipeline
+    from bigbrain.errors import NoProviderAvailableError
+
+    workers = getattr(args, 'workers', 3)
+
+    try:
+        with DistillPipeline.from_config(cfg) as pipeline:
+            pipeline._workers = workers
+            if not pipeline._registry.has_providers():
+                print("No AI providers are enabled.")
+                print("  Enable a provider in config/example.yaml")
+                return 1
+
+            model = args.model if args.model else ""
+            force = getattr(args, 'force', False)
+            step_arg = getattr(args, 'step', '')
+            steps = {step_arg} if step_arg else None
+
+            if args.doc_id:
+                print(f"Distilling document: {args.doc_id}{f' (step: {step_arg})' if step_arg else ''}")
+                result = pipeline.distill_by_id(args.doc_id, model=model, force=force, steps=steps)
+                if result is None:
+                    print(f"Document not found: {args.doc_id}")
+                    return 1
+                _print_distill_result(result)
+            else:
+                source_type = args.type if args.type else None
+                mode = "force" if force else "incremental"
+                step_info = f", step: {step_arg}" if step_arg else ""
+                print(f"Distilling all documents ({mode}{step_info}){f' (type: {source_type})' if source_type else ''}...")
+                results = pipeline.distill_all(model=model, source_type=source_type, force=force, steps=steps)
+
+                total_summaries = sum(len(r.summaries) for r in results)
+                total_entities = sum(len(r.entities) for r in results)
+                total_relationships = sum(len(r.relationships) for r in results)
+                total_errors = sum(len(r.errors) for r in results)
+
+                print()
+                print(f"Distillation complete:")
+                print(f"  Documents:     {len(results)}")
+                print(f"  Summaries:     {total_summaries}")
+                print(f"  Entities:      {total_entities}")
+                print(f"  Relationships: {total_relationships}")
+                if total_errors > 0:
+                    print(f"  Errors:        {total_errors}")
+
+    except NoProviderAvailableError:
+        print("No AI provider is available. Check with: bigbrain providers")
+        return 1
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     return 0
+
+
+def _print_distill_result(result):
+    """Print a single distillation result."""
+    print()
+    print(f"Distillation complete:")
+    print(f"  Chunks:        {len(result.chunks)}")
+    print(f"  Summaries:     {len(result.summaries)}")
+    print(f"  Entities:      {len(result.entities)}")
+    print(f"  Relationships: {len(result.relationships)}")
+
+    if result.summaries:
+        print()
+        print("Summary:")
+        print(f"  {result.summaries[0].content[:500]}")
+
+    if result.entities:
+        print()
+        print(f"Entities ({len(result.entities)}):")
+        for e in result.entities[:15]:
+            print(f"  • {e.name} ({e.entity_type}): {e.description[:80]}")
+        if len(result.entities) > 15:
+            print(f"  ... and {len(result.entities) - 15} more")
+
+    if result.relationships:
+        print()
+        print(f"Relationships ({len(result.relationships)}):")
+        for r in result.relationships[:10]:
+            print(f"  • {r.relationship_type}: {r.description[:80]}")
+        if len(result.relationships) > 10:
+            print(f"  ... and {len(result.relationships) - 10} more")
+
+    if result.errors:
+        print()
+        print(f"Errors ({len(result.errors)}):")
+        for e in result.errors:
+            print(f"  ✗ {e}")
+
+    if result.provider:
+        print()
+        print(f"— {result.provider}/{result.model}")
 
 
 def _handle_compile(args: argparse.Namespace) -> int:
@@ -138,11 +243,21 @@ def _handle_status(args: argparse.Namespace) -> int:
 
     with KBStore(db_path) as store:
         stats = store.get_stats()
+        docs = store.list_documents(limit=9999) if not args.brief else []
 
     print("BigBrain Knowledge Base Status")
     print("=" * 40)
     print(f"  Documents:  {stats['total_documents']}")
     print(f"  Sections:   {stats['total_sections']}")
+
+    # Distillation stats
+    if stats.get('total_chunks', 0) or stats.get('total_summaries', 0):
+        print()
+        print("Distilled:")
+        print(f"  Chunks:        {stats.get('total_chunks', 0)}")
+        print(f"  Summaries:     {stats.get('total_summaries', 0)}")
+        print(f"  Entities:      {stats.get('total_entities', 0)}")
+        print(f"  Relationships: {stats.get('total_relationships', 0)}")
 
     # Format size
     size = stats['total_size_bytes']
@@ -159,6 +274,14 @@ def _handle_status(args: argparse.Namespace) -> int:
         print("By Type:")
         for stype, count in sorted(stats['by_type'].items()):
             print(f"  .{stype}: {count} document(s)")
+
+    # Document listing with IDs
+    if docs:
+        print()
+        print("Documents:")
+        for doc in docs:
+            stype = f" [{doc.source.source_type}]" if doc.source else ""
+            print(f"  {doc.id}  {doc.title}{stype}")
 
     # Last runs
     if stats.get('last_successful_run'):
@@ -179,6 +302,181 @@ def _handle_status(args: argparse.Namespace) -> int:
 
     print()
     print(f"Database: {db_path}")
+
+    return 0
+
+
+def _handle_distill_show(args: argparse.Namespace) -> int:
+    """Show distilled content for a document or all documents."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        return 1
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        if args.doc_id:
+            docs = []
+            doc = store.get_document(args.doc_id)
+            if doc:
+                docs = [doc]
+            else:
+                print(f"Document not found: {args.doc_id}")
+                return 1
+        else:
+            docs = store.list_documents(limit=9999)
+
+        if not docs:
+            print("No documents in KB.")
+            return 0
+
+        for doc in docs:
+            summaries = store.get_summaries(doc.id)
+            entities = store.get_entities(doc.id)
+            relationships = store.get_relationships(doc.id)
+
+            if not summaries and not entities and not relationships:
+                continue
+
+            print(f"{'=' * 60}")
+            source = f" [{doc.source.source_type}]" if doc.source else ""
+            print(f"  {doc.title}{source}")
+            print(f"{'=' * 60}")
+
+            if summaries:
+                print()
+                print("📝 Summary:")
+                for s in summaries:
+                    print(f"  {s.content[:1000]}")
+                    if s.generated_by_model:
+                        print(f"  — {s.generated_by_provider}/{s.generated_by_model}")
+
+            if entities:
+                print()
+                print(f"🏷️  Entities ({len(entities)}):")
+                for e in entities[:30]:
+                    desc = f": {e.description[:60]}" if e.description else ""
+                    print(f"  • {e.name} ({e.entity_type}){desc}")
+                if len(entities) > 30:
+                    print(f"  ... and {len(entities) - 30} more")
+
+            if relationships:
+                # Build name lookup from entities
+                ent_map = {e.id: e.name for e in entities}
+                print()
+                print(f"🔗 Relationships ({len(relationships)}):")
+                for r in relationships[:20]:
+                    src = ent_map.get(r.source_entity_id, r.source_entity_id[:8])
+                    tgt = ent_map.get(r.target_entity_id, r.target_entity_id[:8])
+                    print(f"  • {src} —[{r.relationship_type}]→ {tgt}")
+                    if r.description:
+                        print(f"    {r.description[:80]}")
+                if len(relationships) > 20:
+                    print(f"  ... and {len(relationships) - 20} more")
+
+            print()
+
+    return 0
+
+
+def _handle_entities(args: argparse.Namespace) -> int:
+    """List distilled entities with optional type filter."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        return 1
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        entity_type = getattr(args, 'type', '') or ''
+        search = getattr(args, 'search', '') or ''
+
+        # If --types flag, just show available types
+        if getattr(args, 'types', False):
+            type_counts = store.get_entity_types()
+            if not type_counts:
+                print("No entities found.")
+                return 0
+            print(f"Entity types ({sum(c for _, c in type_counts)} total):")
+            for etype, count in type_counts:
+                print(f"  {etype}: {count}")
+            return 0
+
+        entities = store.list_all_entities(
+            entity_type=entity_type,
+            search=search,
+            limit=getattr(args, 'limit', 500),
+        )
+
+    if not entities:
+        filter_info = f" (type={entity_type})" if entity_type else ""
+        filter_info += f" (search={search})" if search else ""
+        print(f"No entities found{filter_info}.")
+        return 0
+
+    # Group by type for display
+    by_type: dict[str, list] = {}
+    for e in entities:
+        by_type.setdefault(e.entity_type, []).append(e)
+
+    print(f"Entities: {len(entities)} found")
+    print()
+    for etype, ents in sorted(by_type.items()):
+        print(f"  [{etype}] ({len(ents)})")
+        for e in ents:
+            desc = f" — {e.description[:70]}" if e.description else ""
+            print(f"    • {e.name}{desc}")
+        print()
+
+    return 0
+
+
+def _handle_compact(args: argparse.Namespace) -> int:
+    """Compact the knowledge base: deduplicate entities, optimize storage."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        return 1
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        # Get before counts
+        stats_before = store.get_stats()
+        entities_before = stats_before.get("total_entities", 0)
+
+        # Deduplicate entities
+        removed = store.dedup_entities()
+
+        # Get after counts
+        stats_after = store.get_stats()
+        entities_after = stats_after.get("total_entities", 0)
+
+    print("Knowledge Base Compaction")
+    print("=" * 40)
+    print(f"  Entities: {entities_before} → {entities_after} ({removed} duplicates removed)")
+    print()
+    if removed == 0:
+        print("  No duplicates found — KB is already clean.")
+    else:
+        print(f"  ✓ Removed {removed} duplicate entities")
 
     return 0
 
@@ -430,14 +728,86 @@ def _add_distill_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
     p = subparsers.add_parser(
         "distill",
         help="Distill ingested content into summaries, entities, and relationships",
-        description="Distill ingested content into summaries, entities, and relationships.",
+        description="Run the distillation pipeline: chunk, summarize, extract entities, build relationships.",
     )
     p.add_argument(
-        "--target",
-        type=str,
-        help="Identifier of the content to distill",
+        "--doc-id", type=str, default="",
+        help="Distill a specific document by ID (default: distill all)",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter documents by source type (e.g., 'txt', 'md', 'pdf')",
+    )
+    p.add_argument(
+        "--model", type=str, default="",
+        help="Override the AI model to use",
+    )
+    p.add_argument(
+        "--workers", type=int, default=2,
+        help="Number of parallel workers for multi-document distillation (default: 2)",
+    )
+    p.add_argument(
+        "--force", action="store_true", default=False,
+        help="Re-distill all chunks even if unchanged (default: incremental)",
+    )
+    p.add_argument(
+        "--step", type=str, default="", choices=["", "summarize", "entities", "relationships"],
+        help="Run only a specific step (default: all steps)",
     )
     p.set_defaults(func=_handle_distill)
+    return p
+
+
+def _add_distill_show_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``distill-show`` subcommand."""
+    p = subparsers.add_parser(
+        "distill-show",
+        help="Show distilled content (summaries, entities, relationships)",
+        description="Display distillation results stored in the knowledge base.",
+    )
+    p.add_argument(
+        "--doc-id", type=str, default="",
+        help="Show distilled content for a specific document (default: all)",
+    )
+    p.set_defaults(func=_handle_distill_show)
+    return p
+
+
+def _add_entities_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``entities`` subcommand."""
+    p = subparsers.add_parser(
+        "entities",
+        help="List distilled entities with optional filters",
+        description="Display extracted entities from the knowledge base.",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter by entity type (e.g., algorithm, concept, data_structure, theorem, technique)",
+    )
+    p.add_argument(
+        "--search", type=str, default="",
+        help="Search entities by name or description",
+    )
+    p.add_argument(
+        "--types", action="store_true", default=False,
+        help="Show available entity types with counts",
+    )
+    p.add_argument(
+        "--limit", type=int, default=500,
+        help="Maximum entities to display (default: 500)",
+    )
+    p.set_defaults(func=_handle_entities)
+    return p
+
+
+def _add_compact_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``compact`` subcommand."""
+    p = subparsers.add_parser(
+        "compact",
+        help="Compact the KB: deduplicate entities, optimize storage",
+        description="Remove duplicate entities and optimize the knowledge base.",
+    )
+    p.set_defaults(func=_handle_compact)
     return p
 
 
@@ -481,6 +851,10 @@ def _add_status_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         "status",
         help="Show current knowledge base status and statistics",
         description="Show current knowledge base status and statistics.",
+    )
+    p.add_argument(
+        "--brief", action="store_true", default=False,
+        help="Show only counts, skip document listing",
     )
     p.set_defaults(func=_handle_status)
     return p
@@ -656,6 +1030,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_ingest_parser(subparsers)
     _add_distill_parser(subparsers)
+    _add_distill_show_parser(subparsers)
+    _add_entities_parser(subparsers)
+    _add_compact_parser(subparsers)
     _add_compile_parser(subparsers)
     _add_update_parser(subparsers)
     _add_status_parser(subparsers)
