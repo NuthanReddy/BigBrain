@@ -1,0 +1,1 @@
+This file is nested in a subdirectory for recursive traversal testing.

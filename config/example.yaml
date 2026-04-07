@@ -1,0 +1,57 @@
+# BigBrain Configuration
+# =====================
+# Copy this file and customize for your environment.
+# Values here are overridden by BIGBRAIN_* environment variables.
+
+# Application settings
+app:
+  name: bigbrain
+  debug: false
+
+# Logging configuration
+logging:
+  level: INFO          # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: console      # console | json (json reserved for future)
+
+# File paths
+paths:
+  config_path: config/example.yaml
+  data_dir: data
+  kb_dir: data/kb
+
+# AI Provider configuration (Phase 3+)
+# Providers are tried in order of preference with automatic fallback.
+providers:
+  github_copilot:
+    enabled: false
+    # api_key: ""  # Or set BIGBRAIN_GITHUB_COPILOT_API_KEY env var
+  ollama:
+    enabled: false
+    base_url: "http://localhost:11434"
+  lm_studio:
+    enabled: false
+    base_url: "http://localhost:1234"
+
+# Ingestion settings (Phase 1)
+ingestion:
+  supported_extensions: [".txt", ".md", ".pdf", ".py"]
+  recursive: true
+  skip_hidden: true
+  max_file_size_mb: 50
+  encoding: utf-8
+  encoding_fallback: latin-1
+  pdf_extract_metadata: true
+  pdf_preserve_pages: true
+  py_extract_docstrings: true
+  py_extract_symbols: true
+
+# Distillation settings (Phase 4+)
+distillation:
+  # chunking_strategy: sliding_window
+  # chunk_size: 1000
+  # overlap: 200
+
+# Knowledge Base settings (Phase 2+)
+kb:
+  # backend: sqlite    # sqlite | jsonl
+  # db_path: data/kb/bigbrain.db

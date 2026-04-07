@@ -1,0 +1,5 @@
+This is a sample text file for testing BigBrain ingestion.
+
+It has multiple lines and paragraphs.
+
+The text ingester should handle this cleanly.
