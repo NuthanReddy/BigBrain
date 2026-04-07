@@ -119,13 +119,14 @@ class GitHubCopilotProvider(BaseProvider):
 
                 # Permanent auth errors — do not retry
                 if resp.status_code == 400:
-                    body = resp.text[:200]
-                    if "Personal Access Token" in body or "not supported" in body:
+                    body = resp.text[:500]
+                    if "Personal Access Token" in body:
                         raise ProviderError(
                             "github_copilot",
                             "Classic PATs are not supported. "
                             "Run 'bigbrain auth login' to authenticate via GitHub device flow.",
                         )
+                    logger.warning("GitHub Copilot 400 response: %s", body)
                     raise ProviderError("github_copilot", f"Bad request: {body}")
 
                 # Rate limit handling
