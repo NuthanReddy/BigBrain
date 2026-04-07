@@ -17,6 +17,8 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from bigbrain.providers.config import LMStudioConfig, OllamaConfig, ProviderConfig
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -68,12 +70,8 @@ class BigBrainConfig:
     data_dir: str = "data"
     kb_dir: str = "data/kb"
 
-    # providers (reserved for Phase 3+)
-    providers: dict = field(default_factory=lambda: {
-        "github_copilot": {"enabled": False, "api_key": ""},
-        "ollama": {"enabled": False, "base_url": "http://localhost:11434"},
-        "lm_studio": {"enabled": False, "base_url": "http://localhost:1234"},
-    })
+    # providers
+    providers: ProviderConfig = field(default_factory=ProviderConfig)
 
     # ingestion
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
@@ -110,7 +108,7 @@ _YAML_FIELD_MAP: dict[str, str] = {
 }
 
 # Sections that map 1-to-1 to dict fields on the dataclass.
-_YAML_DICT_SECTIONS = ("providers", "distillation")
+_YAML_DICT_SECTIONS = ("distillation",)
 
 
 def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
@@ -154,6 +152,37 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
             **{f.name: getattr(kb_defaults, f.name) for f in fields(KBConfig)},
             **kb_kwargs,
         })
+
+    # Special handling for providers → ProviderConfig
+    if "providers" in yaml_data and isinstance(yaml_data["providers"], dict):
+        prov_data = yaml_data["providers"]
+        ollama_kwargs = {}
+        if "ollama" in prov_data and isinstance(prov_data["ollama"], dict):
+            ollama_defaults = OllamaConfig()
+            for f in fields(OllamaConfig):
+                if f.name in prov_data["ollama"]:
+                    ollama_kwargs[f.name] = prov_data["ollama"][f.name]
+            ollama_cfg = OllamaConfig(**{
+                **{f.name: getattr(ollama_defaults, f.name) for f in fields(OllamaConfig)},
+                **ollama_kwargs,
+            })
+        else:
+            ollama_cfg = OllamaConfig()
+
+        lms_kwargs = {}
+        if "lm_studio" in prov_data and isinstance(prov_data["lm_studio"], dict):
+            lms_defaults = LMStudioConfig()
+            for f in fields(LMStudioConfig):
+                if f.name in prov_data["lm_studio"]:
+                    lms_kwargs[f.name] = prov_data["lm_studio"][f.name]
+            lms_cfg = LMStudioConfig(**{
+                **{f.name: getattr(lms_defaults, f.name) for f in fields(LMStudioConfig)},
+                **lms_kwargs,
+            })
+        else:
+            lms_cfg = LMStudioConfig()
+
+        flat["providers"] = ProviderConfig(ollama=ollama_cfg, lm_studio=lms_cfg)
 
     return flat
 
@@ -364,6 +393,11 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["kb"] = KBConfig(**kb_kwargs)
             elif "kb" in yaml_values:
                 merged["kb"] = base_kb
+            # else: dataclass default is used automatically
+        elif f.name == "providers":
+            # Providers come from YAML only (no env var support yet)
+            if "providers" in yaml_values:
+                merged["providers"] = yaml_values["providers"]
             # else: dataclass default is used automatically
         elif f.name in env_values:
             merged[f.name] = env_values[f.name]

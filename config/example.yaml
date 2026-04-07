@@ -19,18 +19,19 @@ paths:
   data_dir: data
   kb_dir: data/kb
 
-# AI Provider configuration (Phase 3+)
+# AI Provider configuration
 # Providers are tried in order of preference with automatic fallback.
 providers:
-  github_copilot:
-    enabled: false
-    # api_key: ""  # Or set BIGBRAIN_GITHUB_COPILOT_API_KEY env var
   ollama:
     enabled: false
     base_url: "http://localhost:11434"
+    default_model: "llama3.2"
+    timeout: 120
   lm_studio:
     enabled: false
     base_url: "http://localhost:1234"
+    default_model: ""
+    timeout: 120
 
 # Ingestion settings (Phase 1)
 ingestion:

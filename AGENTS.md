@@ -6,7 +6,7 @@
 - Runtime entry point is `main.py` (thin wrapper that calls `bigbrain.cli.main()`).
 - Packaging metadata lives in `pyproject.toml` (`[project]` with Python `>=3.10`).
 - Console script: `bigbrain` (via `pyproject.toml` `[project.scripts]`).
-- Dependency: `pyyaml>=6.0` for config loading.
+- Dependency: `pyyaml>=6.0` for config loading, `httpx>=0.27` for AI provider APIs, `pymupdf>=1.23` and `pypdf>=3.0` for PDF ingestion.
 
 ## Architecture and Flow
 
@@ -20,8 +20,10 @@
 | `bigbrain.cli` | Argparse-based CLI with subcommand dispatch |
 | `bigbrain.config` | `load_config()` – loads YAML config with `BIGBRAIN_*` env var overrides; returns `BigBrainConfig` dataclass |
 | `bigbrain.logging_config` | `setup_logging()` – called once at startup; `get_logger(__name__)` for per-module loggers |
-| `bigbrain.errors` | `UserError` → `IngestionError` → `UnsupportedFormatError`, `FileAccessError`; `ConfigError` |
+| `bigbrain.errors` | `UserError` → `IngestionError` → `UnsupportedFormatError`, `FileAccessError`; `ConfigError`; `ProviderError` → `NoProviderAvailableError` |
 | `bigbrain.kb.models` | `Document`, `SourceMetadata`, `DocumentSection`, `IngestionResult` data models |
+| `bigbrain.kb.store` | `KBStore` – SQLite CRUD, FTS5 search, JSONL export/import, ingestion run tracking |
+| `bigbrain.kb.service` | `KBService` – high-level API wrapping KBStore for use by later phases |
 | `bigbrain.ingest.service` | `ingest_path()` – main ingestion entry point; accepts a path and returns `IngestionResult` |
 | `bigbrain.ingest.registry` | `BaseIngester` ABC + extension-to-ingester registry |
 | `bigbrain.ingest.discovery` | File discovery and filtering (recursive traversal, hidden-file skipping, extension filtering) |
@@ -29,13 +31,18 @@
 | `bigbrain.ingest.markdown_ingester` | Markdown ingester (heading structure, internal links) |
 | `bigbrain.ingest.pdf_ingester` | PDF ingester (page boundaries, metadata) |
 | `bigbrain.ingest.python_ingester` | Python ingester (AST symbol extraction, docstrings) |
-| `bigbrain.kb.store` | `KBStore` – SQLite-backed CRUD, FTS5 full-text search, ingestion run tracking, and aggregate stats |
+| `bigbrain.providers.base` | `BaseProvider` ABC and `ProviderResponse` dataclass for all AI providers |
+| `bigbrain.providers.config` | `OllamaConfig`, `LMStudioConfig`, `ProviderConfig` dataclasses |
+| `bigbrain.providers.registry` | `ProviderRegistry` – loads enabled providers, automatic fallback across providers |
+| `bigbrain.providers.ollama` | `OllamaProvider` – Ollama native REST API client (`/api/generate`, `/api/chat`) |
+| `bigbrain.providers.lm_studio` | `LMStudioProvider` – LM Studio OpenAI-compatible client (`/v1/completions`, `/v1/chat/completions`) |
 
 ### Subpackages
 | Subpackage | Purpose |
 |---|---|
 | `bigbrain.ingest` | **Active (Phase 1)** – Reads source material into a common Document model via format-specific ingesters |
 | `bigbrain.kb` | **Active (Phase 2)** – Document/SourceMetadata/IngestionResult models; `KBStore` provides SQLite persistence and FTS5 search |
+| `bigbrain.providers` | **Active (Phase 3)** – AI provider integration with Ollama and LM Studio; automatic fallback between providers |
 | `bigbrain.orchestrator` | Manages end-to-end workflows and incremental processing |
 | `bigbrain.distill` | Chunk, normalize, summarize, extract entities, build relationships |
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
@@ -53,6 +60,16 @@
 3. CLI saves the `IngestionResult` as a run record via `KBStore.save_ingestion_run()`.
 4. The `status` command reads aggregate statistics via `KBStore.get_stats()` (document count, size, type breakdown, last run).
 5. `--no-store` flag skips steps 2–3, making the ingest command behave like Phase 1 (dry-run).
+
+### Provider Pipeline (Phase 3)
+1. `ProviderRegistry.from_config(config.providers)` reads the `providers:` YAML section and instantiates only enabled providers.
+2. `ProviderRegistry.from_app_config()` is a convenience that calls `load_config()` automatically.
+3. Each provider implements `BaseProvider` ABC: `is_available()`, `complete()`, `chat()`, `summarize()`, `extract_entities()`.
+4. `registry.complete(prompt)` (and other operations) use `_with_fallback()` — tries each registered provider in order; on `ProviderError`, logs a warning and tries the next.
+5. `registry.health_check()` returns a dict of `provider_name → bool` for all registered providers.
+6. `OllamaProvider` uses Ollama's native REST API (`/api/generate`, `/api/chat`, `/api/tags`).
+7. `LMStudioProvider` uses the OpenAI-compatible API (`/v1/completions`, `/v1/chat/completions`, `/v1/models`).
+8. `ProviderResponse` is the common return type: `text`, `model`, `provider`, `usage` (token counts), `metadata`.
 
 ### Error Handling
 - `UserError` for user-facing errors (displayed cleanly, no traceback).
@@ -103,10 +120,10 @@ python main.py ingest --source ./docs --type pdf
 - Pass a custom config file: `python main.py --config path/to/config.yaml`
 
 ### Testing
-- Test fixtures live in `tests/fixtures/ingest/` (sample files for each supported format).
 - Tests use **pytest** (`python -m pytest tests/ -v`).
 - Test fixtures live in `tests/fixtures/ingest/` (sample files for each supported format).
 - KB store tests use `tmp_path` for isolated databases.
+- Provider tests use `unittest.mock` to mock HTTP calls (no real LLM needed).
 
 ## Project-Specific Coding Conventions
 - Keep `main.py` as a thin entry point; all business logic goes in `src/bigbrain/`.
@@ -120,7 +137,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 1)
+## File Structure (Phase 3)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -131,11 +148,26 @@ BigBrain/
 │   └── .gitkeep
 ├── tests/
 │   ├── __init__.py
+│   ├── conftest.py                  # sys.path setup for src/ layout
+│   ├── test_config.py               # Config loading, env overrides, KBConfig
+│   ├── test_errors.py               # Error hierarchy and messages
+│   ├── test_kb_store.py             # KBStore CRUD, upsert, FTS5, JSONL, edge cases
+│   ├── test_kb_service.py           # KBService integration tests
+│   ├── test_providers.py            # Provider mocked HTTP tests + registry fallback
+│   ├── ingest/                      # Ingestion pipeline tests
+│   │   ├── test_discovery.py
+│   │   ├── test_registry.py
+│   │   ├── test_text_ingester.py
+│   │   ├── test_markdown_ingester.py
+│   │   ├── test_pdf_ingester.py
+│   │   ├── test_python_ingester.py
+│   │   └── test_service.py
 │   └── fixtures/
 │       └── ingest/
 │           ├── sample.txt           # Plain-text fixture
 │           ├── sample.md            # Markdown fixture
 │           ├── sample.py            # Python fixture (symbol extraction)
+│           ├── sample.pdf           # PDF fixture (2 pages, metadata)
 │           ├── empty.txt            # Empty file edge case
 │           ├── unsupported.xyz      # Unsupported extension fixture
 │           └── nested/
@@ -161,7 +193,15 @@ BigBrain/
 │       ├── kb/
 │       │   ├── __init__.py          # Knowledge base subpackage
 │       │   ├── models.py            # Document, SourceMetadata, DocumentSection, IngestionResult
-│       │   └── store.py             # KBStore – SQLite persistence, FTS5 search, ingestion runs
+│       │   ├── store.py             # KBStore – SQLite persistence, FTS5 search, ingestion runs
+│       │   └── service.py           # KBService – high-level API for later phases
+│       ├── providers/
+│       │   ├── __init__.py          # Provider subpackage
+│       │   ├── base.py              # BaseProvider ABC, ProviderResponse dataclass
+│       │   ├── config.py            # OllamaConfig, LMStudioConfig, ProviderConfig
+│       │   ├── registry.py          # ProviderRegistry – fallback-enabled provider management
+│       │   ├── ollama.py            # OllamaProvider – native REST API client
+│       │   └── lm_studio.py         # LMStudioProvider – OpenAI-compatible client
 │       ├── distill/
 │       │   └── __init__.py          # Placeholder – distillation pipeline
 │       └── compile/
@@ -171,14 +211,16 @@ BigBrain/
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–2)
+### Current (Phase 0–3)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
+- **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3).
+- **Ollama** – Local LLM inference via native REST API (Phase 3).
+- **LM Studio** – Local LLM inference via OpenAI-compatible API (Phase 3).
 
 ### Future
 | Phase | Integration |
 |---|---|
-| Phase 3+ | GitHub Copilot Enterprise, Ollama, LM Studio (AI providers) |
 | Phase 6+ | Notion API for bi-directional sync |
 
 ## Phase Roadmap
@@ -188,7 +230,7 @@ BigBrain/
 | 0 | Skeleton | Project structure, CLI, config, logging, error handling |
 | 1 | Ingest | Read files (txt, md, pdf, py) into Document model |
 | 2 | Knowledge Base | SQLite/JSONL storage, CRUD, search |
-| 3 | AI Providers | GitHub Copilot, Ollama, LM Studio integration with fallback |
+| 3 | AI Providers | Ollama, LM Studio integration with automatic fallback ✅ |
 | 4 | Distill | Chunking, summarization, entity extraction |
 | 5 | Compile | Render flashcards, notes, study guides |
 | 6 | Notion Sync | Bi-directional Notion integration |

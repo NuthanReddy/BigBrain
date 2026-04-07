@@ -45,3 +45,23 @@ class FileAccessError(IngestionError):
 
 class ConfigError(UserError):
     """Error in configuration loading or validation."""
+
+
+class ProviderError(UserError):
+    """Error communicating with an AI provider."""
+
+    def __init__(self, provider: str, reason: str = ""):
+        self.provider = provider
+        self.reason = reason
+        msg = f"Provider '{provider}' error"
+        if reason:
+            msg += f": {reason}"
+        super().__init__(msg)
+
+
+class NoProviderAvailableError(ProviderError):
+    """Raised when no AI provider is available or reachable."""
+
+    def __init__(self, tried: list[str] | None = None):
+        providers_str = ", ".join(tried) if tried else "none configured"
+        super().__init__("none", f"No provider available (tried: {providers_str})")
