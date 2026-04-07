@@ -51,7 +51,7 @@ distillation:
   # chunk_size: 1000
   # overlap: 200
 
-# Knowledge Base settings (Phase 2+)
+# Knowledge Base settings (Phase 2)
 kb:
-  # backend: sqlite    # sqlite | jsonl
-  # db_path: data/kb/bigbrain.db
+  backend: sqlite
+  # db_path: ""  # Leave empty to use default: <kb_dir>/bigbrain.db

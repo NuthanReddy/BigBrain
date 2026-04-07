@@ -29,12 +29,13 @@
 | `bigbrain.ingest.markdown_ingester` | Markdown ingester (heading structure, internal links) |
 | `bigbrain.ingest.pdf_ingester` | PDF ingester (page boundaries, metadata) |
 | `bigbrain.ingest.python_ingester` | Python ingester (AST symbol extraction, docstrings) |
+| `bigbrain.kb.store` | `KBStore` – SQLite-backed CRUD, FTS5 full-text search, ingestion run tracking, and aggregate stats |
 
 ### Subpackages
 | Subpackage | Purpose |
 |---|---|
 | `bigbrain.ingest` | **Active (Phase 1)** – Reads source material into a common Document model via format-specific ingesters |
-| `bigbrain.kb` | **Active (Phase 1)** – Document/SourceMetadata/IngestionResult models; storage coming in Phase 2 |
+| `bigbrain.kb` | **Active (Phase 2)** – Document/SourceMetadata/IngestionResult models; `KBStore` provides SQLite persistence and FTS5 search |
 | `bigbrain.orchestrator` | Manages end-to-end workflows and incremental processing |
 | `bigbrain.distill` | Chunk, normalize, summarize, extract entities, build relationships |
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
@@ -45,6 +46,13 @@
 3. For each discovered file, `registry.get_ingester(extension)` returns the appropriate `BaseIngester`.
 4. The ingester's `.ingest(path)` method returns a `Document` with sections and metadata.
 5. Results are collected into an `IngestionResult` (successes, failures, skipped counts).
+
+### Storage Pipeline (Phase 2)
+1. CLI parses `ingest --source <path>` and calls `bigbrain.ingest.service.ingest_path()` (pure, no side effects).
+2. CLI persists each successfully ingested `Document` via `KBStore.save_document()` (upsert by content-hash ID).
+3. CLI saves the `IngestionResult` as a run record via `KBStore.save_ingestion_run()`.
+4. The `status` command reads aggregate statistics via `KBStore.get_stats()` (document count, size, type breakdown, last run).
+5. `--no-store` flag skips steps 2–3, making the ingest command behave like Phase 1 (dry-run).
 
 ### Error Handling
 - `UserError` for user-facing errors (displayed cleanly, no traceback).
@@ -96,7 +104,9 @@ python main.py ingest --source ./docs --type pdf
 
 ### Testing
 - Test fixtures live in `tests/fixtures/ingest/` (sample files for each supported format).
-- No test runner is configured yet; tests will be added alongside Phase 1 implementation tests.
+- Tests use **pytest** (`python -m pytest tests/ -v`).
+- Test fixtures live in `tests/fixtures/ingest/` (sample files for each supported format).
+- KB store tests use `tmp_path` for isolated databases.
 
 ## Project-Specific Coding Conventions
 - Keep `main.py` as a thin entry point; all business logic goes in `src/bigbrain/`.
@@ -150,7 +160,8 @@ BigBrain/
 │       │   └── python_ingester.py   # Python AST ingester
 │       ├── kb/
 │       │   ├── __init__.py          # Knowledge base subpackage
-│       │   └── models.py            # Document, SourceMetadata, DocumentSection, IngestionResult
+│       │   ├── models.py            # Document, SourceMetadata, DocumentSection, IngestionResult
+│       │   └── store.py             # KBStore – SQLite persistence, FTS5 search, ingestion runs
 │       ├── distill/
 │       │   └── __init__.py          # Placeholder – distillation pipeline
 │       └── compile/
@@ -160,14 +171,13 @@ BigBrain/
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0)
+### Current (Phase 0–2)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
-- No external service integrations yet.
+- **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 
 ### Future
 | Phase | Integration |
 |---|---|
-| Phase 2+ | SQLite for knowledge base persistence |
 | Phase 3+ | GitHub Copilot Enterprise, Ollama, LM Studio (AI providers) |
 | Phase 6+ | Notion API for bi-directional sync |
 

@@ -1,11 +1,13 @@
 """Tests for bigbrain.config."""
 
 import os
+from pathlib import Path
 from unittest import mock
 
 from bigbrain.config import (
     BigBrainConfig,
     IngestionConfig,
+    KBConfig,
     load_config,
     load_env_overrides,
 )
@@ -92,3 +94,30 @@ class TestLoadEnvOverrides:
         ):
             cfg = load_config()
             assert cfg.log_level == "WARNING"
+
+
+class TestKBConfig:
+    """Tests for KBConfig defaults and kb_db_path derivation."""
+
+    def test_default_kb_config(self):
+        kb = KBConfig()
+        assert kb.backend == "sqlite"
+        assert kb.db_path == ""
+
+    def test_kb_db_path_derived_from_kb_dir(self):
+        cfg = BigBrainConfig(kb_dir="data/kb")
+        assert cfg.kb_db_path == str(Path("data/kb") / "bigbrain.db")
+
+    def test_kb_db_path_explicit_overrides(self):
+        cfg = BigBrainConfig(kb=KBConfig(db_path="/custom/path.db"))
+        assert cfg.kb_db_path == "/custom/path.db"
+
+    def test_kb_env_overrides(self):
+        with mock.patch.dict(
+            os.environ,
+            {"BIGBRAIN_KB_DB_PATH": "/env/override.db"},
+            clear=False,
+        ):
+            cfg = load_config()
+            assert cfg.kb.db_path == "/env/override.db"
+            assert cfg.kb_db_path == "/env/override.db"

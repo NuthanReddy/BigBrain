@@ -20,6 +20,9 @@ def _handle_ingest(args: argparse.Namespace) -> int:
     """Run the ingestion pipeline on the specified path."""
     from bigbrain.ingest.service import ingest_path
     from bigbrain.errors import UserError
+    from bigbrain.logging_config import get_logger
+
+    logger = get_logger(__name__)
 
     source = args.source
     if not source:
@@ -61,6 +64,25 @@ def _handle_ingest(args: argparse.Namespace) -> int:
             if doc.sections:
                 print(f"    sections: {len(doc.sections)}")
 
+    # Persist to KB unless --no-store
+    if not args.no_store:
+        from bigbrain.kb.store import KBStore
+        from bigbrain.config import load_config
+
+        cfg = load_config()
+        stored_count = 0
+        with KBStore(cfg.kb_db_path) as store:
+            for doc in result.documents:
+                try:
+                    store.save_document(doc)
+                    stored_count += 1
+                except Exception as exc:
+                    logger.warning("Failed to store document %s: %s", doc.title, exc)
+
+            store.save_ingestion_run(result, source_path=source)
+
+        print(f"  💾 Stored:    {stored_count} document(s) in knowledge base")
+
     # Show warnings
     if result.warnings:
         print()
@@ -98,12 +120,152 @@ def _handle_update(args: argparse.Namespace) -> int:
 
 
 def _handle_status(args: argparse.Namespace) -> int:
-    print("⚠ 'status' is not implemented yet. This command will be available in a future phase.")
+    """Show knowledge base status and statistics."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    # Check if DB exists
+    if not Path(db_path).exists():
+        print("Knowledge base is empty (no database found).")
+        print(f"  Expected location: {db_path}")
+        print("  Run 'bigbrain ingest --source <path>' to populate it.")
+        return 0
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        stats = store.get_stats()
+
+    print("BigBrain Knowledge Base Status")
+    print("=" * 40)
+    print(f"  Documents:  {stats['total_documents']}")
+    print(f"  Sections:   {stats['total_sections']}")
+
+    # Format size
+    size = stats['total_size_bytes']
+    if size >= 1_048_576:
+        print(f"  Total size: {size / 1_048_576:.1f} MB")
+    elif size >= 1024:
+        print(f"  Total size: {size / 1024:.1f} KB")
+    else:
+        print(f"  Total size: {size} bytes")
+
+    # By type breakdown
+    if stats['by_type']:
+        print()
+        print("By Type:")
+        for stype, count in sorted(stats['by_type'].items()):
+            print(f"  .{stype}: {count} document(s)")
+
+    # Last runs
+    if stats.get('last_successful_run'):
+        run = stats['last_successful_run']
+        print()
+        print(f"Last successful ingestion: {run.get('finished_at', 'unknown')}")
+        print(f"  Processed: {run.get('processed', 0)}, Skipped: {run.get('skipped', 0)}, Failed: {run.get('failed', 0)}")
+
+    if stats.get('last_failed_run'):
+        run = stats['last_failed_run']
+        print()
+        print(f"Last failed ingestion: {run.get('finished_at', 'unknown')}")
+        print(f"  Processed: {run.get('processed', 0)}, Failed: {run.get('failed', 0)}")
+
+    if not stats.get('last_successful_run') and not stats.get('last_failed_run'):
+        print()
+        print("No ingestion runs recorded yet.")
+
+    print()
+    print(f"Database: {db_path}")
+
     return 0
 
 
 def _handle_kb_search(args: argparse.Namespace) -> int:
-    print("⚠ 'kb-search' is not implemented yet. This command will be available in a future phase.")
+    """Search the knowledge base using full-text search."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty (no database found).")
+        print("  Run 'bigbrain ingest --source <path>' to populate it.")
+        return 1
+
+    from bigbrain.kb.store import KBStore
+
+    query = args.query
+    limit = args.limit if hasattr(args, 'limit') else 20
+
+    with KBStore(db_path) as store:
+        results = store.search_documents(query, limit=limit)
+
+    if not results:
+        print(f"No results found for: {query}")
+        return 0
+
+    print(f"Found {len(results)} result(s) for: {query}")
+    print()
+
+    for i, doc in enumerate(results, 1):
+        source_info = ""
+        if doc.source:
+            source_info = f" [{doc.source.source_type}]"
+        print(f"  {i}. {doc.title}{source_info}")
+        if doc.source:
+            print(f"     {doc.source.file_path}")
+
+        # Show a content snippet (first 150 chars, single line)
+        snippet = doc.content[:150].replace("\n", " ").strip()
+        if len(doc.content) > 150:
+            snippet += "..."
+        if snippet:
+            print(f"     {snippet}")
+        print()
+
+    return 0
+
+
+def _handle_kb_export(args: argparse.Namespace) -> int:
+    """Export knowledge base to JSONL file."""
+    from bigbrain.kb.store import KBStore
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    if not Path(cfg.kb_db_path).exists():
+        print("Knowledge base is empty (no database found).")
+        return 1
+
+    output = args.output
+    with KBStore(cfg.kb_db_path) as store:
+        count = store.export_jsonl(output)
+
+    print(f"Exported {count} document(s) to {output}")
+    return 0
+
+
+def _handle_kb_import(args: argparse.Namespace) -> int:
+    """Import documents from JSONL file."""
+    from bigbrain.kb.store import KBStore
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    input_path = args.input
+
+    if not Path(input_path).exists():
+        from bigbrain.errors import UserError
+        raise UserError(f"File not found: {input_path}")
+
+    with KBStore(cfg.kb_db_path) as store:
+        imported, skipped = store.import_jsonl(input_path)
+
+    print(f"Imported {imported} document(s), skipped {skipped}")
     return 0
 
 
@@ -146,6 +308,12 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         action="store_true",
         default=False,
         help="Include hidden files and directories (default: false)",
+    )
+    p.add_argument(
+        "--no-store",
+        action="store_true",
+        default=False,
+        help="Skip saving documents to the knowledge base",
     )
     p.set_defaults(func=_handle_ingest)
     return p
@@ -217,14 +385,45 @@ def _add_kb_search_parser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     p = subparsers.add_parser(
         "kb-search",
         help="Search the knowledge base",
-        description="Search the knowledge base.",
+        description="Search the knowledge base using full-text search.",
+    )
+    p.add_argument("query", type=str, help="Search query string")
+    p.add_argument("--limit", type=int, default=20,
+                   help="Maximum number of results (default: 20)")
+    p.set_defaults(func=_handle_kb_search)
+    return p
+
+
+def _add_kb_export_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``kb-export`` subcommand."""
+    p = subparsers.add_parser(
+        "kb-export",
+        help="Export knowledge base to JSONL",
+        description="Export all documents in the knowledge base to a JSONL file.",
     )
     p.add_argument(
-        "query",
+        "--output", "-o",
         type=str,
-        help="Search query string",
+        default="kb-export.jsonl",
+        help="Output file path (default: kb-export.jsonl)",
     )
-    p.set_defaults(func=_handle_kb_search)
+    p.set_defaults(func=_handle_kb_export)
+    return p
+
+
+def _add_kb_import_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``kb-import`` subcommand."""
+    p = subparsers.add_parser(
+        "kb-import",
+        help="Import documents from JSONL",
+        description="Import documents from a JSONL file into the knowledge base.",
+    )
+    p.add_argument(
+        "input",
+        type=str,
+        help="Path to JSONL file to import",
+    )
+    p.set_defaults(func=_handle_kb_import)
     return p
 
 
@@ -250,6 +449,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_update_parser(subparsers)
     _add_status_parser(subparsers)
     _add_kb_search_parser(subparsers)
+    _add_kb_export_parser(subparsers)
+    _add_kb_import_parser(subparsers)
 
     return parser
 
