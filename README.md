@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 3 – AI Provider Integration.** Ollama and LM Studio backends with automatic fallback. Phase 2 storage and Phase 1 ingestion remain active.
+**Phase 3B – AI Provider Integration.** Ollama, LM Studio, and GitHub Copilot backends with preferred provider routing and automatic fallback. Phase 2 storage and Phase 1 ingestion remain active.
 
 ## Quick Start
 
@@ -28,6 +28,7 @@ python main.py --help
 | `bigbrain kb-search` | Search the knowledge base (full-text)                    | 2 ✅   |
 | `bigbrain kb-export` | Export knowledge base to JSONL file                      | 2 ✅   |
 | `bigbrain kb-import` | Import documents from a JSONL file                       | 2 ✅   |
+| `bigbrain providers` | Show AI provider status and availability                  | 3 ✅   |
 | `bigbrain distill`   | Distill content into summaries, entities, relationships  | 4      |
 | `bigbrain compile`   | Compile knowledge base into output formats               | 5      |
 | `bigbrain update`    | Run incremental update on changed sources                | 7      |
@@ -137,7 +138,7 @@ with KBService.from_config() as svc:
 
 ## AI Providers (Phase 3)
 
-BigBrain integrates with local LLM providers for text generation, summarization, and entity extraction. Providers are tried in order with automatic fallback.
+BigBrain integrates with local and cloud LLM providers for text generation, summarization, and entity extraction. Providers are tried in order (or by preferred provider) with automatic fallback.
 
 ### Supported Providers
 
@@ -145,12 +146,14 @@ BigBrain integrates with local LLM providers for text generation, summarization,
 |----------|-----|-------------|
 | Ollama | Native REST API | http://localhost:11434 |
 | LM Studio | OpenAI-compatible | http://localhost:1234 |
+| GitHub Copilot | OpenAI-compatible | https://api.githubcopilot.com |
 
 ### Configuration
 
 Enable providers in `config/example.yaml`:
 ```yaml
 providers:
+  preferred_provider: "ollama"  # Optional: override fallback order
   ollama:
     enabled: true
     base_url: "http://localhost:11434"
@@ -160,6 +163,12 @@ providers:
     enabled: true
     base_url: "http://localhost:1234"
     timeout: 120
+  github_copilot:
+    enabled: true
+    # api_token: ""  # Or set GITHUB_TOKEN env var
+    default_model: "gpt-4o"
+    timeout: 60
+    max_retries: 3
 ```
 
 ### Python API
@@ -180,6 +189,16 @@ print(response.text)
 response = registry.chat([
     {"role": "user", "content": "What is a binary tree?"}
 ])
+```
+
+### Provider Status CLI
+
+```bash
+# Check provider status
+python main.py providers
+
+# Show available models
+python main.py providers --models
 ```
 
 ## Configuration
@@ -203,6 +222,7 @@ Top-level settings use the `BIGBRAIN_` prefix. Nested ingestion settings use `BI
 | `BIGBRAIN_INGESTION_ENCODING` | string | `latin-1` |
 | `BIGBRAIN_KB_BACKEND` | string | `sqlite` |
 | `BIGBRAIN_KB_DB_PATH` | string | `/custom/path.db` |
+| `GITHUB_TOKEN` | string | GitHub Copilot API token |
 
 ## Project Structure
 
@@ -227,10 +247,12 @@ BigBrain/
 │   │   └── service.py     # KBService – high-level API for later phases
 │   ├── providers/         # AI providers (Phase 3 ✅)
 │   │   ├── base.py        # BaseProvider ABC, ProviderResponse
-│   │   ├── config.py      # OllamaConfig, LMStudioConfig, ProviderConfig
-│   │   ├── registry.py    # ProviderRegistry with fallback
+│   │   ├── config.py      # OllamaConfig, LMStudioConfig, GitHubCopilotConfig, ProviderConfig
+│   │   ├── registry.py    # ProviderRegistry with preferred provider + fallback
 │   │   ├── ollama.py      # Ollama REST API client
-│   │   └── lm_studio.py   # LM Studio OpenAI-compatible client
+│   │   ├── lm_studio.py   # LM Studio OpenAI-compatible client
+│   │   ├── github_copilot.py  # GitHub Copilot OpenAI-compatible client
+│   │   └── github_auth.py     # GitHub token discovery and authentication
 │   ├── orchestrator/      # Pipeline orchestration (future)
 │   ├── distill/           # Content distillation (future)
 │   └── compile/           # Output compilation (future)
@@ -276,7 +298,7 @@ python -m pytest tests/ingest/test_pdf_ingester.py -v
 | 0     | Foundation and CLI scaffold                  ✅   |
 | 1     | File ingestion (local files into raw store)  ✅   |
 | 2     | Knowledge base storage and status reporting  ✅   |
-| 3     | AI provider integration (Ollama, LM Studio)  ✅   |
+| 3     | AI provider integration (Ollama, LM Studio, GitHub Copilot)  ✅   |
 | 4     | Content distillation (summaries, entities)        |
 | 5     | Knowledge compilation into output formats         |
 | 6     | Relationship extraction and knowledge graph       |

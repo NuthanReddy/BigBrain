@@ -32,17 +32,19 @@
 | `bigbrain.ingest.pdf_ingester` | PDF ingester (page boundaries, metadata) |
 | `bigbrain.ingest.python_ingester` | Python ingester (AST symbol extraction, docstrings) |
 | `bigbrain.providers.base` | `BaseProvider` ABC and `ProviderResponse` dataclass for all AI providers |
-| `bigbrain.providers.config` | `OllamaConfig`, `LMStudioConfig`, `ProviderConfig` dataclasses |
-| `bigbrain.providers.registry` | `ProviderRegistry` – loads enabled providers, automatic fallback across providers |
+| `bigbrain.providers.config` | `OllamaConfig`, `LMStudioConfig`, `GitHubCopilotConfig`, `ProviderConfig` dataclasses |
+| `bigbrain.providers.registry` | `ProviderRegistry` – loads enabled providers, preferred provider routing with automatic fallback |
 | `bigbrain.providers.ollama` | `OllamaProvider` – Ollama native REST API client (`/api/generate`, `/api/chat`) |
 | `bigbrain.providers.lm_studio` | `LMStudioProvider` – LM Studio OpenAI-compatible client (`/v1/completions`, `/v1/chat/completions`) |
+| `bigbrain.providers.github_copilot` | `GitHubCopilotProvider` – GitHub Copilot OpenAI-compatible client (`/chat/completions`, `/models`) |
+| `bigbrain.providers.github_auth` | GitHub token discovery (env vars, CLI config) and authentication helpers |
 
 ### Subpackages
 | Subpackage | Purpose |
 |---|---|
 | `bigbrain.ingest` | **Active (Phase 1)** – Reads source material into a common Document model via format-specific ingesters |
 | `bigbrain.kb` | **Active (Phase 2)** – Document/SourceMetadata/IngestionResult models; `KBStore` provides SQLite persistence and FTS5 search |
-| `bigbrain.providers` | **Active (Phase 3)** – AI provider integration with Ollama and LM Studio; automatic fallback between providers |
+| `bigbrain.providers` | **Active (Phase 3)** – AI provider integration with Ollama, LM Studio, and GitHub Copilot; preferred provider routing with automatic fallback |
 | `bigbrain.orchestrator` | Manages end-to-end workflows and incremental processing |
 | `bigbrain.distill` | Chunk, normalize, summarize, extract entities, build relationships |
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
@@ -64,12 +66,15 @@
 ### Provider Pipeline (Phase 3)
 1. `ProviderRegistry.from_config(config.providers)` reads the `providers:` YAML section and instantiates only enabled providers.
 2. `ProviderRegistry.from_app_config()` is a convenience that calls `load_config()` automatically.
-3. Each provider implements `BaseProvider` ABC: `is_available()`, `complete()`, `chat()`, `summarize()`, `extract_entities()`.
-4. `registry.complete(prompt)` (and other operations) use `_with_fallback()` — tries each registered provider in order; on `ProviderError`, logs a warning and tries the next.
-5. `registry.health_check()` returns a dict of `provider_name → bool` for all registered providers.
-6. `OllamaProvider` uses Ollama's native REST API (`/api/generate`, `/api/chat`, `/api/tags`).
-7. `LMStudioProvider` uses the OpenAI-compatible API (`/v1/completions`, `/v1/chat/completions`, `/v1/models`).
-8. `ProviderResponse` is the common return type: `text`, `model`, `provider`, `usage` (token counts), `metadata`.
+3. If `preferred_provider` is set in config, that provider is tried first before falling back to others.
+4. Each provider implements `BaseProvider` ABC: `is_available()`, `complete()`, `chat()`, `summarize()`, `extract_entities()`.
+5. `registry.complete(prompt)` (and other operations) use `_with_fallback()` — tries the preferred provider first (if set), then remaining providers in order; on `ProviderError`, logs a warning and tries the next.
+6. `registry.health_check()` returns a dict of `provider_name → bool` for all registered providers.
+7. `OllamaProvider` uses Ollama's native REST API (`/api/generate`, `/api/chat`, `/api/tags`).
+8. `LMStudioProvider` uses the OpenAI-compatible API (`/v1/completions`, `/v1/chat/completions`, `/v1/models`).
+9. `GitHubCopilotProvider` uses the OpenAI-compatible API at `https://api.githubcopilot.com` (`/chat/completions`, `/models`); authentication via `GITHUB_TOKEN` env var or GitHub CLI config.
+10. `github_auth` handles token discovery: checks `GITHUB_TOKEN` env var, then falls back to GitHub CLI stored credentials.
+11. `ProviderResponse` is the common return type: `text`, `model`, `provider`, `usage` (token counts), `metadata`.
 
 ### Error Handling
 - `UserError` for user-facing errors (displayed cleanly, no traceback).
@@ -137,7 +142,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 3)
+## File Structure (Phase 3B)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -198,10 +203,12 @@ BigBrain/
 │       ├── providers/
 │       │   ├── __init__.py          # Provider subpackage
 │       │   ├── base.py              # BaseProvider ABC, ProviderResponse dataclass
-│       │   ├── config.py            # OllamaConfig, LMStudioConfig, ProviderConfig
-│       │   ├── registry.py          # ProviderRegistry – fallback-enabled provider management
+│       │   ├── config.py            # OllamaConfig, LMStudioConfig, GitHubCopilotConfig, ProviderConfig
+│       │   ├── registry.py          # ProviderRegistry – preferred provider routing + fallback
 │       │   ├── ollama.py            # OllamaProvider – native REST API client
-│       │   └── lm_studio.py         # LMStudioProvider – OpenAI-compatible client
+│       │   ├── lm_studio.py         # LMStudioProvider – OpenAI-compatible client
+│       │   ├── github_copilot.py    # GitHubCopilotProvider – OpenAI-compatible client
+│       │   └── github_auth.py       # GitHub token discovery and authentication
 │       ├── distill/
 │       │   └── __init__.py          # Placeholder – distillation pipeline
 │       └── compile/
@@ -211,12 +218,13 @@ BigBrain/
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–3)
+### Current (Phase 0–3B)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3).
 - **Ollama** – Local LLM inference via native REST API (Phase 3).
 - **LM Studio** – Local LLM inference via OpenAI-compatible API (Phase 3).
+- **GitHub Copilot** – Cloud LLM inference via OpenAI-compatible API at `api.githubcopilot.com` (Phase 3B).
 
 ### Future
 | Phase | Integration |
@@ -230,7 +238,7 @@ BigBrain/
 | 0 | Skeleton | Project structure, CLI, config, logging, error handling |
 | 1 | Ingest | Read files (txt, md, pdf, py) into Document model |
 | 2 | Knowledge Base | SQLite/JSONL storage, CRUD, search |
-| 3 | AI Providers | Ollama, LM Studio integration with automatic fallback ✅ |
+| 3 | AI Providers | Ollama, LM Studio, GitHub Copilot integration with preferred provider routing and automatic fallback ✅ |
 | 4 | Distill | Chunking, summarization, entity extraction |
 | 5 | Compile | Render flashcards, notes, study guides |
 | 6 | Notion Sync | Bi-directional Notion integration |

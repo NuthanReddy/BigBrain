@@ -230,6 +230,45 @@ def _handle_kb_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_providers(args: argparse.Namespace) -> int:
+    """Show AI provider status and availability."""
+    from bigbrain.providers.registry import ProviderRegistry
+
+    registry = ProviderRegistry.from_app_config()
+
+    if not registry.has_providers():
+        print("No AI providers are enabled.")
+        print("  Enable providers in config/example.yaml under 'providers:'")
+        return 0
+
+    print("AI Provider Status")
+    print("=" * 40)
+
+    if registry.preferred:
+        print(f"  Preferred: {registry.preferred}")
+    print()
+
+    health = registry.health_check()
+    for name, available in health.items():
+        status = "✓ available" if available else "✗ unavailable"
+        preferred_tag = " (preferred)" if name == registry.preferred else ""
+        print(f"  {name}{preferred_tag}: {status}")
+
+    # List models for available providers
+    available = registry.get_available_providers()
+    if available and args.models:
+        print()
+        for provider in available:
+            if hasattr(provider, 'list_models'):
+                models = provider.list_models()
+                if models:
+                    print(f"  {provider.name} models:")
+                    for m in models[:10]:
+                        print(f"    • {m}")
+
+    return 0
+
+
 def _handle_kb_export(args: argparse.Namespace) -> int:
     """Export knowledge base to JSONL file."""
     from bigbrain.kb.store import KBStore
@@ -427,6 +466,23 @@ def _add_kb_import_parser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     return p
 
 
+def _add_providers_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``providers`` subcommand."""
+    p = subparsers.add_parser(
+        "providers",
+        help="Show AI provider status and availability",
+        description="Show registered AI providers, health status, and available models.",
+    )
+    p.add_argument(
+        "--models",
+        action="store_true",
+        default=False,
+        help="Also list available models for each provider",
+    )
+    p.set_defaults(func=_handle_providers)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -451,6 +507,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_kb_search_parser(subparsers)
     _add_kb_export_parser(subparsers)
     _add_kb_import_parser(subparsers)
+    _add_providers_parser(subparsers)
 
     return parser
 
