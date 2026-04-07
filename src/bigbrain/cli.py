@@ -24,9 +24,61 @@ def _handle_ingest(args: argparse.Namespace) -> int:
 
     logger = get_logger(__name__)
 
+    # URL ingestion mode
+    if args.url:
+        from bigbrain.ingest.url_ingester import UrlIngester
+        print(f"Ingesting URL: {args.url}")
+        try:
+            ingester = UrlIngester()
+            doc = ingester.ingest(args.url)
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+        print(f"  Title: {doc.title}")
+        print(f"  Size: {doc.source.size_bytes:,} bytes")
+        if doc.sections:
+            print(f"  Sections: {len(doc.sections)}")
+
+        if not args.no_store:
+            from bigbrain.kb.store import KBStore
+            from bigbrain.config import load_config
+            cfg = load_config()
+            with KBStore(cfg.kb_db_path) as store:
+                store.save_document(doc)
+            print(f"  💾 Stored in knowledge base")
+
+        return 0
+
+    # API ingestion mode
+    if args.api:
+        from bigbrain.ingest.api_ingester import ApiIngester
+        print(f"Ingesting API: {args.api}")
+        try:
+            ingester = ApiIngester(auth_token=args.auth_token)
+            doc = ingester.ingest(args.api, json_path=args.json_path)
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+        print(f"  Title: {doc.title}")
+        print(f"  Size: {doc.source.size_bytes:,} bytes")
+        if doc.sections:
+            print(f"  Sections: {len(doc.sections)}")
+
+        if not args.no_store:
+            from bigbrain.kb.store import KBStore
+            from bigbrain.config import load_config
+            cfg = load_config()
+            with KBStore(cfg.kb_db_path) as store:
+                store.save_document(doc)
+            print(f"  💾 Stored in knowledge base")
+
+        return 0
+
     source = args.source
     if not source:
-        raise UserError("--source is required. Specify a file or directory to ingest.")
+        raise UserError("--source, --url, or --api is required. Specify a file, directory, URL, or API endpoint.")
 
     print(f"Ingesting from: {source}")
     print(f"  recursive: {args.recursive}")
@@ -825,6 +877,22 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         action="store_true",
         default=False,
         help="Skip saving documents to the knowledge base",
+    )
+    p.add_argument(
+        "--url", type=str, default="",
+        help="URL of a web page to ingest",
+    )
+    p.add_argument(
+        "--api", type=str, default="",
+        help="URL of a REST API endpoint to ingest (JSON)",
+    )
+    p.add_argument(
+        "--json-path", type=str, default="",
+        help="Dot-separated path to extract from API JSON response (e.g., 'data.content')",
+    )
+    p.add_argument(
+        "--auth-token", type=str, default="",
+        help="Bearer token for API authentication",
     )
     p.set_defaults(func=_handle_ingest)
     return p

@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 7 – Incremental Updates & Orchestration.** End-to-end pipeline with change detection. All previous phases active.
+**Phase 8 – Multi-source Ingestion.** Ingest from URLs and REST APIs alongside local files. All previous phases active.
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ python main.py --help
 
 | Command              | Description                                              | Phase  |
 |----------------------|----------------------------------------------------------|--------|
-| `bigbrain ingest`    | Ingest content from local files or external sources      | 1 ✅   |
+| `bigbrain ingest`    | Ingest from files, URLs, or APIs                     | 1 ✅   |
 | `bigbrain status`    | Show knowledge base status and statistics                | 2 ✅   |
 | `bigbrain kb-search` | Search the knowledge base (full-text)                    | 2 ✅   |
 | `bigbrain kb-export` | Export knowledge base to JSONL file                      | 2 ✅   |
@@ -78,6 +78,20 @@ ingestion:
   recursive: true
   skip_hidden: true
   max_file_size_mb: 50
+```
+
+### Web & API Ingestion
+
+```bash
+# Ingest a web page
+bigbrain ingest --url https://example.com/article
+
+# Ingest from a REST API
+bigbrain ingest --api https://api.example.com/data
+bigbrain ingest --api https://api.example.com/data --json-path results.items
+
+# API with authentication
+bigbrain ingest --api https://api.example.com/private --auth-token YOUR_TOKEN
 ```
 
 ## Knowledge Base (Phase 2)
@@ -413,7 +427,9 @@ BigBrain/
 │   │   ├── text_ingester.py
 │   │   ├── markdown_ingester.py
 │   │   ├── pdf_ingester.py
-│   │   └── python_ingester.py
+│   │   ├── python_ingester.py
+│   │   ├── url_ingester.py
+│   │   └── api_ingester.py
 │   ├── kb/                # Knowledge base (Phase 2 ✅)
 │   │   ├── models.py      # Document, SourceMetadata, etc.
 │   │   ├── store.py       # KBStore – SQLite persistence + FTS5 search
@@ -468,7 +484,7 @@ BigBrain/
 ### Running Tests
 
 ```bash
-# Run full test suite (361+ tests)
+# Run full test suite (426+ tests)
 python -m pytest tests/ -v
 
 # Run by module
@@ -494,7 +510,7 @@ python -m pytest tests/test_orchestrator.py -v # Orchestrator pipeline
 | 5     | Knowledge compilation into output formats    ✅   |
 | 6     | Notion bidirectional page sync and knowledge updates  ✅  |
 | 7     | Incremental updates and knowledge base search     ✅  |
-| 8     | Multi-source ingestion (URLs, APIs)               |
+| 8     | Multi-source ingestion (URLs, APIs)          ✅   |
 | 9     | Plugin system and extensibility                   |
 | 10    | Production hardening and performance optimization |
 | 11    | Polyglot entity store (Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |

@@ -31,6 +31,8 @@
 | `bigbrain.ingest.markdown_ingester` | Markdown ingester (heading structure, internal links) |
 | `bigbrain.ingest.pdf_ingester` | PDF ingester (page boundaries, metadata) |
 | `bigbrain.ingest.python_ingester` | Python ingester (AST symbol extraction, docstrings) |
+| `bigbrain.ingest.url_ingester` | URL/web page ingester (HTML fetch, text extraction via BeautifulSoup + html2text) |
+| `bigbrain.ingest.api_ingester` | REST API JSON ingester (fetch JSON, flatten to text, json-path extraction, pagination) |
 | `bigbrain.providers.base` | `BaseProvider` ABC and `ProviderResponse` dataclass for all AI providers |
 | `bigbrain.providers.config` | `OllamaConfig`, `LMStudioConfig`, `GitHubCopilotConfig`, `ProviderConfig` dataclasses |
 | `bigbrain.providers.registry` | `ProviderRegistry` – loads enabled providers, preferred provider routing with automatic fallback |
@@ -48,7 +50,7 @@
 ### Subpackages
 | Subpackage | Purpose |
 |---|---|
-| `bigbrain.ingest` | **Active (Phase 1)** – Reads source material into a common Document model via format-specific ingesters |
+| `bigbrain.ingest` | **Active (Phase 1, 8)** – Reads source material into a common Document model via format-specific ingesters; supports local files, URLs, and REST APIs |
 | `bigbrain.kb` | **Active (Phase 2)** – Document/SourceMetadata/IngestionResult models; `KBStore` provides SQLite persistence and FTS5 search |
 | `bigbrain.providers` | **Active (Phase 3)** – AI provider integration with Ollama, LM Studio, and GitHub Copilot; preferred provider routing with automatic fallback |
 | `bigbrain.orchestrator` | **Active (Phase 7)** – End-to-end pipeline orchestration with file change detection and incremental processing |
@@ -170,7 +172,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 7)
+## File Structure (Phase 8)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -199,6 +201,8 @@ BigBrain/
 │   │   ├── test_markdown_ingester.py
 │   │   ├── test_pdf_ingester.py
 │   │   ├── test_python_ingester.py
+│   │   ├── test_url_ingester.py
+│   │   ├── test_api_ingester.py
 │   │   └── test_service.py
 │   └── fixtures/
 │       └── ingest/
@@ -229,7 +233,9 @@ BigBrain/
 │       │   ├── text_ingester.py     # Plain-text ingester
 │       │   ├── markdown_ingester.py # Markdown ingester
 │       │   ├── pdf_ingester.py      # PDF ingester
-│       │   └── python_ingester.py   # Python AST ingester
+│       │   ├── python_ingester.py   # Python AST ingester
+│       │   ├── url_ingester.py     # URL/web page ingester (HTML → text)
+│       │   └── api_ingester.py     # REST API JSON ingester
 │       ├── kb/
 │       │   ├── __init__.py          # Knowledge base subpackage
 │       │   ├── models.py            # Document, SourceMetadata, DocumentSection, IngestionResult
@@ -278,14 +284,16 @@ BigBrain/
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–7)
+### Current (Phase 0–8)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
-- **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3).
+- **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3) and URL/API ingestion (Phase 8).
 - **Ollama** – Local LLM inference via native REST API (Phase 3).
 - **LM Studio** – Local LLM inference via OpenAI-compatible API (Phase 3).
 - **GitHub Copilot** – Cloud LLM inference via OAuth device flow at `api.githubcopilot.com` (Phase 3B).
 - **notion-client** (`>=2.0`) – Notion SDK for Python; page/block CRUD and search (Phase 6).
+- **beautifulsoup4** – HTML parsing for URL ingestion (Phase 8).
+- **html2text** – HTML-to-text conversion for URL ingestion (Phase 8).
 
 ### Future
 | Phase | Integration |
@@ -305,8 +313,8 @@ BigBrain/
 | 5 | Compile | Markdown, flashcards, cheatsheets, Q&A, study guides ✅ |
 | 6 | Notion Integration | Bidirectional sync between KB and Notion workspace ✅ |
 | 7 | Orchestrator | End-to-end pipeline, incremental updates ✅ |
-| 8 | Plugin system | Extensibility for custom ingesters/compilers |
-| 9 | Polish | Progress bars, rich output, error recovery |
-| 10 | Distribution | Packaging, docs, CI/CD, release automation |
+| 8 | Multi-source Ingestion | URL/web page ingestion and REST API JSON ingestion ✅ |
+| 9 | Plugin system | Extensibility for custom ingesters/compilers |
+| 10 | Production hardening | Progress bars, rich output, error recovery, performance optimization |
 | 11 | Polyglot Entity Store | Pluggable distilled-entity/vector backends; keep SQLite default for local/dev |
 
