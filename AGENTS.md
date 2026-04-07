@@ -42,6 +42,8 @@
 | `bigbrain.notion.importer` | `NotionImporter` – converts Notion blocks → KB `Document` with sections |
 | `bigbrain.notion.exporter` | `NotionExporter` – exports KB docs + distilled content → Notion pages |
 | `bigbrain.notion.sync` | `SyncEngine` – bidirectional sync with conflict detection and `SyncResult` tracking |
+| `bigbrain.orchestrator.change_detector` | `ChangeDetector` – file change detection via mtime + content hash; `ChangeResult` with changed/new/deleted file lists |
+| `bigbrain.orchestrator.pipeline` | `Orchestrator` – end-to-end update pipeline (detect changes → ingest → distill → compile); `OrchestratorResult` tracking |
 
 ### Subpackages
 | Subpackage | Purpose |
@@ -49,7 +51,7 @@
 | `bigbrain.ingest` | **Active (Phase 1)** – Reads source material into a common Document model via format-specific ingesters |
 | `bigbrain.kb` | **Active (Phase 2)** – Document/SourceMetadata/IngestionResult models; `KBStore` provides SQLite persistence and FTS5 search |
 | `bigbrain.providers` | **Active (Phase 3)** – AI provider integration with Ollama, LM Studio, and GitHub Copilot; preferred provider routing with automatic fallback |
-| `bigbrain.orchestrator` | Manages end-to-end workflows and incremental processing |
+| `bigbrain.orchestrator` | **Active (Phase 7)** – End-to-end pipeline orchestration with file change detection and incremental processing |
 | `bigbrain.distill` | Chunk, normalize, summarize, extract entities, build relationships |
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
 | `bigbrain.notion` | **Active (Phase 6)** – Bidirectional sync between KB and Notion workspace; import, export, and sync engine |
@@ -89,6 +91,18 @@
 5. **Sync**: `SyncEngine.sync()` compares `notion_last_edited` vs `local_last_edited` timestamps → detects conflicts → imports newer Notion pages and exports newer local docs.
 6. **Status**: `notion status` checks API connectivity via `NotionClient.is_available()` and lists sync mappings from `KBStore.list_sync_mappings()`.
 7. Sync mappings are stored in the `notion_sync` table (KB schema v4) with `document_id ↔ notion_page_id` tracking, direction, timestamps, and status.
+
+### Orchestrator Pipeline (Phase 7)
+1. `bigbrain.cli` parses `update --source <path>` with optional `--force`, `--steps`, and `--model` flags.
+2. `ChangeDetector` scans the source path and compares file mtime + content hashes against `file_hashes` table in `KBStore` (KB schema v5).
+3. `ChangeDetector.scan()` returns a `ChangeResult` listing changed, new, and deleted files.
+4. `Orchestrator.run()` executes the pipeline steps in order: ingest → distill → compile, processing only changed/new files (or all files if `--force`).
+5. `_run_ingest()` calls `ingest_path()` for changed files and persists results via `KBStore`, then updates `file_hashes` via `KBStore.save_file_hash()`.
+6. `_run_distill()` runs the distillation pipeline on newly ingested/changed documents.
+7. `_run_compile()` runs the compilation pipeline on updated content.
+8. Deleted files are cleaned up: `KBStore.delete_file_hash()` removes tracking records.
+9. `--steps` flag allows running a subset of the pipeline (e.g., `ingest` only, or `ingest,distill`).
+10. Results are collected into an `OrchestratorResult` with per-step status and timing.
 
 ### Error Handling
 - `UserError` for user-facing errors (displayed cleanly, no traceback).
@@ -156,7 +170,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 6)
+## File Structure (Phase 7)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -177,6 +191,7 @@ BigBrain/
 │   ├── test_distill.py              # Chunker, summarizer, entities, relationships, pipeline
 │   ├── test_compile.py              # Compilers, pipeline, config
 │   ├── test_notion.py               # Notion client, importer, exporter, sync, KB mappings
+│   ├── test_orchestrator.py         # Change detector, orchestrator pipeline, KB file hashes
 │   ├── ingest/                      # Ingestion pipeline tests
 │   │   ├── test_discovery.py
 │   │   ├── test_registry.py
@@ -203,7 +218,9 @@ BigBrain/
 │       ├── logging_config.py        # setup_logging(), get_logger()
 │       ├── errors.py                # UserError, IngestionError, ProviderError, etc.
 │       ├── orchestrator/
-│       │   └── __init__.py          # Placeholder – workflow orchestration
+│       │   ├── __init__.py          # Orchestrator exports (ChangeDetector, Orchestrator)
+│       │   ├── change_detector.py   # File change detection (mtime + content hash)
+│       │   └── pipeline.py          # Orchestrator – end-to-end update pipeline
 │       ├── ingest/
 │       │   ├── __init__.py          # Ingestion subpackage
 │       │   ├── service.py           # ingest_path() – main entry point
@@ -261,7 +278,7 @@ BigBrain/
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–6)
+### Current (Phase 0–7)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3).
@@ -287,7 +304,7 @@ BigBrain/
 | 4 | Distill | Chunking, summarization, entity extraction, relationships ✅ |
 | 5 | Compile | Markdown, flashcards, cheatsheets, Q&A, study guides ✅ |
 | 6 | Notion Integration | Bidirectional sync between KB and Notion workspace ✅ |
-| 7 | Orchestrator | End-to-end pipeline, incremental updates |
+| 7 | Orchestrator | End-to-end pipeline, incremental updates ✅ |
 | 8 | Plugin system | Extensibility for custom ingesters/compilers |
 | 9 | Polish | Progress bars, rich output, error recovery |
 | 10 | Distribution | Packaging, docs, CI/CD, release automation |

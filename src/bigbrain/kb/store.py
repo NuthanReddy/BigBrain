@@ -22,7 +22,7 @@ from bigbrain.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS documents (
@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS notion_sync (
     status TEXT NOT NULL DEFAULT 'synced',
     metadata_json TEXT NOT NULL DEFAULT '{}',
     UNIQUE(document_id, notion_page_id)
+);
+
+CREATE TABLE IF NOT EXISTS file_hashes (
+    file_path TEXT PRIMARY KEY,
+    mtime REAL NOT NULL DEFAULT 0,
+    content_hash TEXT NOT NULL DEFAULT '',
+    last_ingested_at TEXT NOT NULL DEFAULT '',
+    document_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
@@ -269,6 +277,21 @@ class KBStore:
                     );
                 """)
                 logger.info("Schema migration: added notion_sync table")
+            except Exception:
+                pass
+
+        if from_version < 5:
+            try:
+                self._conn.execute("""
+                    CREATE TABLE IF NOT EXISTS file_hashes (
+                        file_path TEXT PRIMARY KEY,
+                        mtime REAL NOT NULL DEFAULT 0,
+                        content_hash TEXT NOT NULL DEFAULT '',
+                        last_ingested_at TEXT NOT NULL DEFAULT '',
+                        document_id TEXT NOT NULL DEFAULT ''
+                    )
+                """)
+                logger.info("Schema migration: added file_hashes table")
             except Exception:
                 pass
 
@@ -1143,4 +1166,52 @@ class KBStore:
                 cur = self._conn.execute(
                     "DELETE FROM notion_sync WHERE document_id = ?", (document_id,)
                 )
+            return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # File hash tracking (incremental ingestion)
+    # ------------------------------------------------------------------
+
+    def save_file_hash(self, file_path: str, mtime: float, content_hash: str, document_id: str = "") -> None:
+        """Save or update a file hash record for change tracking."""
+        now = _utcnow()
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO file_hashes (file_path, mtime, content_hash, last_ingested_at, document_id) "
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(file_path) DO UPDATE SET "
+                    "mtime = excluded.mtime, content_hash = excluded.content_hash, "
+                    "last_ingested_at = excluded.last_ingested_at, document_id = excluded.document_id",
+                    (file_path, mtime, content_hash, now, document_id),
+                )
+
+    def get_file_hashes(self) -> dict[str, dict]:
+        """Get all file hash records. Returns {file_path: {mtime, content_hash, document_id}}."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT file_path, mtime, content_hash, last_ingested_at, document_id FROM file_hashes"
+            ).fetchall()
+        return {
+            r[0]: {"mtime": r[1], "content_hash": r[2], "last_ingested_at": r[3], "document_id": r[4]}
+            for r in rows
+        }
+
+    def get_file_hash(self, file_path: str) -> dict | None:
+        """Get a single file hash record."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT file_path, mtime, content_hash, last_ingested_at, document_id "
+                "FROM file_hashes WHERE file_path = ?",
+                (file_path,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"file_path": row[0], "mtime": row[1], "content_hash": row[2], "last_ingested_at": row[3], "document_id": row[4]}
+
+    def delete_file_hash(self, file_path: str) -> bool:
+        """Remove a file hash record."""
+        with self._lock:
+            with self._conn:
+                cur = self._conn.execute("DELETE FROM file_hashes WHERE file_path = ?", (file_path,))
             return cur.rowcount > 0

@@ -284,8 +284,51 @@ def _handle_compile(args: argparse.Namespace) -> int:
 
 
 def _handle_update(args: argparse.Namespace) -> int:
-    print("⚠ 'update' is not implemented yet. This command will be available in a future phase.")
-    return 0
+    """Run incremental update pipeline on changed sources."""
+    from bigbrain.config import load_config
+    from bigbrain.orchestrator.pipeline import Orchestrator
+
+    cfg = load_config()
+    source = args.source
+    if not source:
+        from bigbrain.errors import UserError
+        raise UserError("--source is required for update. Specify a file or directory.")
+
+    force = getattr(args, 'force', False)
+    model = getattr(args, 'model', '') or ''
+
+    # Parse steps
+    step_arg = getattr(args, 'steps', '')
+    steps = set(step_arg.split(',')) if step_arg else None
+
+    compile_format = getattr(args, 'format', '') or ''
+
+    mode = "force" if force else "incremental"
+    print(f"Running {mode} update from: {source}")
+
+    with Orchestrator.from_config(cfg) as orch:
+        result = orch.run(
+            source, force=force, steps=steps,
+            model=model, compile_format=compile_format,
+        )
+
+    print()
+    print(f"Update complete ({', '.join(result.steps_run)}):")
+    print(f"  Ingested:    {result.ingested}")
+    if result.skipped_unchanged:
+        print(f"  Unchanged:   {result.skipped_unchanged}")
+    if result.deleted:
+        print(f"  Deleted:     {result.deleted}")
+    if result.distilled:
+        print(f"  Distilled:   {result.distilled}")
+    if result.compiled:
+        print(f"  Compiled:    {result.compiled}")
+    if result.errors:
+        print(f"  Errors:      {len(result.errors)}")
+        for e in result.errors[:5]:
+            print(f"    ✗ {e}")
+
+    return 1 if result.errors else 0
 
 
 def _handle_status(args: argparse.Namespace) -> int:
@@ -913,14 +956,13 @@ def _add_update_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     p = subparsers.add_parser(
         "update",
         help="Run incremental update pipeline on changed sources",
-        description="Run incremental update pipeline on changed sources.",
+        description="Detect changes, re-ingest, distill, and compile incrementally.",
     )
-    p.add_argument(
-        "--source",
-        type=str,
-        default=None,
-        help="Optional path filter to limit the update scope",
-    )
+    p.add_argument("--source", type=str, default=None, help="Path to file or directory")
+    p.add_argument("--force", action="store_true", default=False, help="Skip change detection, reprocess everything")
+    p.add_argument("--steps", type=str, default="", help="Comma-separated steps: ingest,distill,compile (default: all)")
+    p.add_argument("--model", type=str, default="", help="Override AI model")
+    p.add_argument("--format", type=str, default="", help="Compile format (markdown, flashcard, etc.)")
     p.set_defaults(func=_handle_update)
     return p
 

@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 6 – Notion Integration.** Full bidirectional sync between BigBrain KB and Notion workspace. All previous phases remain active.
+**Phase 7 – Incremental Updates & Orchestration.** End-to-end pipeline with change detection. All previous phases active.
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ python main.py --help
 | `bigbrain compact`   | Deduplicate entities, optimize KB                        | 4 ✅   |
 | `bigbrain compile`   | Compile knowledge base into output formats               | 5      |
 | `bigbrain notion`    | Notion sync/import/export/status                         | 6 ✅   |
-| `bigbrain update`    | Run incremental update on changed sources                | 7      |
+| `bigbrain update`    | Incremental update pipeline (ingest→distill→compile)     | 7 ✅   |
 
 ## Ingestion (Phase 1)
 
@@ -351,6 +351,29 @@ notion:
   auto_create_pages: true
 ```
 
+## Incremental Updates (Phase 7)
+
+Automatically detect changed files and run only the necessary pipeline steps.
+
+### Usage
+
+```bash
+# Incremental update (only processes changed files)
+bigbrain update --source path/to/docs/
+
+# Force full reprocessing
+bigbrain update --source path/to/docs/ --force
+
+# Run specific steps only
+bigbrain update --source path/to/docs/ --steps ingest
+bigbrain update --source path/to/docs/ --steps ingest,distill
+
+# With AI model override
+bigbrain update --source path/to/docs/ --model claude-opus-4.6
+```
+
+Change detection uses file modification times and content hashes to skip unchanged files.
+
 ## Configuration
 
 1. Copy `config/example.yaml` and customize for your environment.
@@ -403,7 +426,9 @@ BigBrain/
 │   │   ├── lm_studio.py   # LM Studio OpenAI-compatible client
 │   │   ├── github_copilot.py  # GitHub Copilot OpenAI-compatible client
 │   │   └── github_auth.py     # GitHub token discovery and authentication
-│   ├── orchestrator/      # Pipeline orchestration (future)
+│   ├── orchestrator/      # Pipeline orchestration (Phase 7 ✅)
+│   │   ├── change_detector.py  # File change detection (mtime + content hash)
+│   │   └── pipeline.py         # Orchestrator – end-to-end update pipeline
 │   ├── distill/           # Content distillation (Phase 4 ✅)
 │   │   ├── models.py      # Chunk, Summary, Entity, Relationship
 │   │   ├── chunker.py     # Chunking strategies (section, sliding window, paragraph)
@@ -443,7 +468,7 @@ BigBrain/
 ### Running Tests
 
 ```bash
-# Run full test suite (341+ tests)
+# Run full test suite (361+ tests)
 python -m pytest tests/ -v
 
 # Run by module
@@ -454,6 +479,7 @@ python -m pytest tests/test_rag.py -v      # RAG pipeline
 python -m pytest tests/test_distill.py -v  # Distillation
 python -m pytest tests/test_compile.py -v  # Compilation
 python -m pytest tests/test_notion.py -v   # Notion integration
+python -m pytest tests/test_orchestrator.py -v # Orchestrator pipeline
 ```
 
 ## Phase Roadmap
@@ -467,7 +493,7 @@ python -m pytest tests/test_notion.py -v   # Notion integration
 | 4     | Content distillation (summaries, entities, relationships)   ✅   |
 | 5     | Knowledge compilation into output formats    ✅   |
 | 6     | Notion bidirectional page sync and knowledge updates  ✅  |
-| 7     | Incremental updates and knowledge base search     |
+| 7     | Incremental updates and knowledge base search     ✅  |
 | 8     | Multi-source ingestion (URLs, APIs)               |
 | 9     | Plugin system and extensibility                   |
 | 10    | Production hardening and performance optimization |
