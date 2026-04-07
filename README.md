@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 8 – Multi-source Ingestion.** Ingest from URLs and REST APIs alongside local files. All previous phases active.
+**Phase 9 – Plugin System.** Extensible plugin architecture for custom ingesters and compilers. All previous phases active.
 
 ## Quick Start
 
@@ -38,6 +38,7 @@ python main.py --help
 | `bigbrain compile`   | Compile knowledge base into output formats               | 5      |
 | `bigbrain notion`    | Notion sync/import/export/status                         | 6 ✅   |
 | `bigbrain update`    | Incremental update pipeline (ingest→distill→compile)     | 7 ✅   |
+| `bigbrain plugins`   | List discovered plugins                                  | 9 ✅   |
 
 ## Ingestion (Phase 1)
 
@@ -388,6 +389,54 @@ bigbrain update --source path/to/docs/ --model claude-opus-4.6
 
 Change detection uses file modification times and content hashes to skip unchanged files.
 
+## Plugin System (Phase 9)
+
+Extend BigBrain with custom ingesters, compilers, and processors.
+
+### Creating a Plugin
+
+Place a `.py` file in the `plugins/` directory:
+
+```python
+from bigbrain.plugins.base import IngestPlugin, PluginInfo
+from bigbrain.kb.models import Document, SourceMetadata
+from pathlib import Path
+
+class MyIngester(IngestPlugin):
+    def info(self):
+        return PluginInfo(name="my_ingester", version="1.0", plugin_type="ingester")
+    
+    def supported_extensions(self):
+        return [".xyz"]
+    
+    def ingest(self, path: Path) -> Document:
+        content = path.read_text()
+        return Document(title=path.stem, content=content,
+                       source=SourceMetadata(file_path=str(path), file_extension=".xyz", source_type="xyz"))
+```
+
+### Plugin Types
+
+| Type | Base Class | Purpose |
+|------|-----------|---------|
+| Ingester | `IngestPlugin` | Custom file format support |
+| Compiler | `CompilePlugin` | Custom output formats |
+| Processor | `ProcessorPlugin` | Document transformation |
+
+### Usage
+
+```bash
+# List discovered plugins
+bigbrain plugins
+
+# Plugins are auto-discovered from plugins/ directory
+```
+
+### Included Example Plugins
+
+- `csv_ingester` — Ingest CSV files as structured documents
+- `html_compiler` — Export knowledge as standalone HTML pages
+
 ## Configuration
 
 1. Copy `config/example.yaml` and customize for your environment.
@@ -452,19 +501,26 @@ BigBrain/
 │   │   ├── entities.py    # AI entity extraction
 │   │   ├── relationships.py # AI relationship building
 │   │   └── pipeline.py    # DistillPipeline orchestrator
-│   └── compile/           # Knowledge compilation (Phase 5 ✅)
-│       ├── models.py      # CompileOutput, Flashcard, QAPair, OutputFormat
-│       ├── markdown.py    # Markdown summary renderer
-│       ├── flashcard.py   # AI/template flashcard generator
-│       ├── cheatsheet.py  # Entity-based cheatsheet
-│       ├── qa_generator.py # AI/template Q&A generator
-│       ├── study_guide.py # AI/template study guide
-│       └── pipeline.py    # CompilePipeline orchestrator
+│   ├── compile/           # Knowledge compilation (Phase 5 ✅)
+│   │   ├── models.py      # CompileOutput, Flashcard, QAPair, OutputFormat
+│   │   ├── markdown.py    # Markdown summary renderer
+│   │   ├── flashcard.py   # AI/template flashcard generator
+│   │   ├── cheatsheet.py  # Entity-based cheatsheet
+│   │   ├── qa_generator.py # AI/template Q&A generator
+│   │   ├── study_guide.py # AI/template study guide
+│   │   └── pipeline.py    # CompilePipeline orchestrator
 │   ├── notion/            # Notion integration (Phase 6 ✅)
 │   │   ├── client.py      # Notion API client wrapper
 │   │   ├── importer.py    # Import Notion pages to KB
 │   │   ├── exporter.py    # Export KB content to Notion
 │   │   └── sync.py        # Bidirectional sync engine
+│   └── plugins/           # Plugin system (Phase 9 ✅)
+│       ├── base.py        # PluginBase, IngestPlugin, CompilePlugin, ProcessorPlugin ABCs
+│       ├── discovery.py   # Directory scanning + entry_points discovery
+│       └── loader.py      # PluginLoader – validate, filter, register
+├── plugins/               # User plugin directory (auto-discovered)
+│   ├── csv_ingester.py    # Example: CSV file ingester
+│   └── html_compiler.py   # Example: HTML page compiler
 ├── tests/                 # Test suite
 │   ├── ingest/            # Ingestion pipeline tests
 │   └── fixtures/ingest/   # Ingestion test fixtures
@@ -496,6 +552,7 @@ python -m pytest tests/test_distill.py -v  # Distillation
 python -m pytest tests/test_compile.py -v  # Compilation
 python -m pytest tests/test_notion.py -v   # Notion integration
 python -m pytest tests/test_orchestrator.py -v # Orchestrator pipeline
+python -m pytest tests/test_plugins.py -v  # Plugin system
 ```
 
 ## Phase Roadmap
@@ -511,7 +568,7 @@ python -m pytest tests/test_orchestrator.py -v # Orchestrator pipeline
 | 6     | Notion bidirectional page sync and knowledge updates  ✅  |
 | 7     | Incremental updates and knowledge base search     ✅  |
 | 8     | Multi-source ingestion (URLs, APIs)          ✅   |
-| 9     | Plugin system and extensibility                   |
+| 9     | Plugin system and extensibility               ✅   |
 | 10    | Production hardening and performance optimization |
 | 11    | Polyglot entity store (Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |
 

@@ -46,6 +46,9 @@
 | `bigbrain.notion.sync` | `SyncEngine` – bidirectional sync with conflict detection and `SyncResult` tracking |
 | `bigbrain.orchestrator.change_detector` | `ChangeDetector` – file change detection via mtime + content hash; `ChangeResult` with changed/new/deleted file lists |
 | `bigbrain.orchestrator.pipeline` | `Orchestrator` – end-to-end update pipeline (detect changes → ingest → distill → compile); `OrchestratorResult` tracking |
+| `bigbrain.plugins.base` | `PluginBase`, `IngestPlugin`, `CompilePlugin`, `ProcessorPlugin` ABCs; `PluginInfo` dataclass |
+| `bigbrain.plugins.discovery` | `discover_from_directory()` – scans `.py` files for `PluginBase` subclasses; `discover_from_entry_points()` – loads `bigbrain.plugins` entry points |
+| `bigbrain.plugins.loader` | `PluginLoader` – discovers, validates, filters (enabled/disabled), and registers plugins with ingest registry |
 
 ### Subpackages
 | Subpackage | Purpose |
@@ -57,6 +60,7 @@
 | `bigbrain.distill` | Chunk, normalize, summarize, extract entities, build relationships |
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
 | `bigbrain.notion` | **Active (Phase 6)** – Bidirectional sync between KB and Notion workspace; import, export, and sync engine |
+| `bigbrain.plugins` | **Active (Phase 9)** – Extensible plugin system for custom ingesters, compilers, and processors; directory scanning + entry_points discovery |
 
 ### Ingestion Pipeline (Phase 1)
 1. `bigbrain.cli` parses `ingest --source <path>` and calls `bigbrain.ingest.service.ingest_path()`.
@@ -105,6 +109,15 @@
 8. Deleted files are cleaned up: `KBStore.delete_file_hash()` removes tracking records.
 9. `--steps` flag allows running a subset of the pipeline (e.g., `ingest` only, or `ingest,distill`).
 10. Results are collected into an `OrchestratorResult` with per-step status and timing.
+
+### Plugin Pipeline (Phase 9)
+1. `PluginLoader.from_config()` reads the `plugins:` YAML section (or defaults) to get `plugins_dir` and `enabled`/`disabled` lists.
+2. `discover_from_directory(plugins_dir)` scans `plugins/` for `.py` files and imports classes that subclass `PluginBase`.
+3. `discover_from_entry_points("bigbrain.plugins")` loads third-party plugins installed via pip entry points.
+4. Each discovered plugin is validated: must return a `PluginInfo` from `.info()` and must not be in the `disabled` list.
+5. `IngestPlugin` subclasses are registered with the ingest registry for their `supported_extensions()`.
+6. `CompilePlugin` and `ProcessorPlugin` subclasses are stored for use by compile and distill pipelines.
+7. The `bigbrain plugins` CLI command lists all discovered plugins with name, version, type, and status.
 
 ### Error Handling
 - `UserError` for user-facing errors (displayed cleanly, no traceback).
@@ -172,7 +185,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 8)
+## File Structure (Phase 9)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -194,6 +207,7 @@ BigBrain/
 │   ├── test_compile.py              # Compilers, pipeline, config
 │   ├── test_notion.py               # Notion client, importer, exporter, sync, KB mappings
 │   ├── test_orchestrator.py         # Change detector, orchestrator pipeline, KB file hashes
+│   ├── test_plugins.py              # Plugin base, discovery, loader, example plugins
 │   ├── ingest/                      # Ingestion pipeline tests
 │   │   ├── test_discovery.py
 │   │   ├── test_registry.py
@@ -279,12 +293,20 @@ BigBrain/
 │       │   ├── importer.py          # NotionImporter – Notion blocks → KB Documents
 │       │   ├── exporter.py          # NotionExporter – KB docs → Notion pages
 │       │   └── sync.py              # SyncEngine – bidirectional sync with conflict detection
+│       └── plugins/
+│           ├── __init__.py          # Plugin system exports (PluginBase, IngestPlugin, etc.)
+│           ├── base.py              # PluginBase, IngestPlugin, CompilePlugin, ProcessorPlugin ABCs
+│           ├── discovery.py         # Directory scanning + entry_points discovery
+│           └── loader.py            # PluginLoader – validate, filter, register
+├── plugins/                         # User plugin directory (auto-discovered)
+│   ├── csv_ingester.py              # Example: CSV file ingester
+│   └── html_compiler.py             # Example: HTML page compiler
 └── AGENTS.md                        # This file
 ```
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–8)
+### Current (Phase 0–9)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3) and URL/API ingestion (Phase 8).
@@ -314,7 +336,7 @@ BigBrain/
 | 6 | Notion Integration | Bidirectional sync between KB and Notion workspace ✅ |
 | 7 | Orchestrator | End-to-end pipeline, incremental updates ✅ |
 | 8 | Multi-source Ingestion | URL/web page ingestion and REST API JSON ingestion ✅ |
-| 9 | Plugin system | Extensibility for custom ingesters/compilers |
+| 9 | Plugin system | Extensible plugin architecture for custom ingesters, compilers, processors ✅ |
 | 10 | Production hardening | Progress bars, rich output, error recovery, performance optimization |
 | 11 | Polyglot Entity Store | Pluggable distilled-entity/vector backends; keep SQLite default for local/dev |
 

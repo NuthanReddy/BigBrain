@@ -87,3 +87,10 @@ notion:
 kb:
   backend: sqlite
   # db_path: ""  # Leave empty to use default: <kb_dir>/bigbrain.db
+
+# Plugin settings (Phase 9)
+plugins:
+  plugins_dir: plugins
+  auto_discover: true
+  enabled_plugins: []
+  disabled_plugins: []

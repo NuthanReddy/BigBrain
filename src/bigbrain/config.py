@@ -92,6 +92,15 @@ class NotionConfig:
 
 
 @dataclass
+class PluginConfig:
+    """Configuration for the plugin system."""
+    plugins_dir: str = "plugins"  # directory to scan for plugin files
+    auto_discover: bool = True  # auto-discover plugins on startup
+    enabled_plugins: list[str] = field(default_factory=list)  # empty = all discovered
+    disabled_plugins: list[str] = field(default_factory=list)
+
+
+@dataclass
 class BigBrainConfig:
     """Central configuration object for the BigBrain application."""
 
@@ -125,6 +134,9 @@ class BigBrainConfig:
 
     # notion
     notion: NotionConfig = field(default_factory=NotionConfig)
+
+    # plugins
+    plugins: PluginConfig = field(default_factory=PluginConfig)
 
     @property
     def kb_db_path(self) -> str:
@@ -236,6 +248,19 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
             **notion_kwargs,
         })
 
+    # Special handling for plugins → PluginConfig
+    if "plugins" in yaml_data and isinstance(yaml_data["plugins"], dict):
+        plugin_data = yaml_data["plugins"]
+        plugin_defaults = PluginConfig()
+        plugin_kwargs = {}
+        for plugin_field in fields(PluginConfig):
+            if plugin_field.name in plugin_data:
+                plugin_kwargs[plugin_field.name] = plugin_data[plugin_field.name]
+        flat["plugins"] = PluginConfig(**{
+            **{f.name: getattr(plugin_defaults, f.name) for f in fields(PluginConfig)},
+            **plugin_kwargs,
+        })
+
     # Special handling for providers → ProviderConfig
     if "providers" in yaml_data and isinstance(yaml_data["providers"], dict):
         prov_data = yaml_data["providers"]
@@ -327,6 +352,7 @@ _PROVIDERS_ENV_PREFIX = "BIGBRAIN_PROVIDERS_"
 _DISTILL_ENV_PREFIX = "BIGBRAIN_DISTILL_"
 _COMPILE_ENV_PREFIX = "BIGBRAIN_COMPILE_"
 _NOTION_ENV_PREFIX = "BIGBRAIN_NOTION_"
+_PLUGINS_ENV_PREFIX = "BIGBRAIN_PLUGINS_"
 
 # Fields whose env values should be interpreted as booleans.
 _BOOL_FIELDS: set[str] = {f.name for f in fields(BigBrainConfig) if f.type == "bool"}
@@ -370,6 +396,15 @@ _COMPILE_INT_FIELDS: set[str] = {
 _NOTION_VALID_FIELDS: set[str] = {f.name for f in fields(NotionConfig)}
 _NOTION_BOOL_FIELDS: set[str] = {
     f.name for f in fields(NotionConfig) if f.type == "bool"
+}
+
+# PluginConfig field metadata for type coercion
+_PLUGINS_VALID_FIELDS: set[str] = {f.name for f in fields(PluginConfig)}
+_PLUGINS_BOOL_FIELDS: set[str] = {
+    f.name for f in fields(PluginConfig) if f.type == "bool"
+}
+_PLUGINS_LIST_FIELDS: set[str] = {
+    f.name for f in fields(PluginConfig) if f.type == "list[str]"
 }
 
 
@@ -416,6 +451,7 @@ def load_env_overrides() -> dict[str, Any]:
     distill_overrides: dict[str, Any] = {}
     compile_overrides: dict[str, Any] = {}
     notion_overrides: dict[str, Any] = {}
+    plugins_overrides: dict[str, Any] = {}
 
     for key, value in os.environ.items():
         if not key.startswith(_ENV_PREFIX):
@@ -477,6 +513,21 @@ def load_env_overrides() -> dict[str, Any]:
                 notion_overrides[notion_field] = value
             continue
 
+        # Check for BIGBRAIN_PLUGINS_*
+        if key.startswith(_PLUGINS_ENV_PREFIX):
+            plugin_field = key[len(_PLUGINS_ENV_PREFIX):].lower()
+            if plugin_field not in _PLUGINS_VALID_FIELDS:
+                continue
+            if plugin_field in _PLUGINS_BOOL_FIELDS:
+                plugins_overrides[plugin_field] = _coerce_bool(value)
+            elif plugin_field in _PLUGINS_LIST_FIELDS:
+                plugins_overrides[plugin_field] = [
+                    item.strip() for item in value.split(",") if item.strip()
+                ]
+            else:
+                plugins_overrides[plugin_field] = value
+            continue
+
         # Check for BIGBRAIN_COMPILE_*
         if key.startswith(_COMPILE_ENV_PREFIX):
             comp_field = key[len(_COMPILE_ENV_PREFIX):].lower()
@@ -511,6 +562,8 @@ def load_env_overrides() -> dict[str, Any]:
         overrides["compile"] = compile_overrides
     if notion_overrides:
         overrides["notion"] = notion_overrides
+    if plugins_overrides:
+        overrides["plugins"] = plugins_overrides
 
     return overrides
 
@@ -618,6 +671,20 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["notion"] = NotionConfig(**notion_kwargs)
             elif "notion" in yaml_values:
                 merged["notion"] = base_notion
+            # else: dataclass default is used automatically
+        elif f.name == "plugins":
+            # Special merge: defaults → YAML → env (field-level)
+            base_plugins = yaml_values.get("plugins", PluginConfig())
+            env_plugins = env_values.get("plugins")
+            if env_plugins:
+                plugins_kwargs = {
+                    fld.name: getattr(base_plugins, fld.name)
+                    for fld in fields(PluginConfig)
+                }
+                plugins_kwargs.update(env_plugins)
+                merged["plugins"] = PluginConfig(**plugins_kwargs)
+            elif "plugins" in yaml_values:
+                merged["plugins"] = base_plugins
             # else: dataclass default is used automatically
         elif f.name == "providers":
             # Special merge: defaults → YAML → env (field-level)

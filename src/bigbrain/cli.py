@@ -1341,6 +1341,45 @@ def _add_notion_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     return p
 
 
+def _handle_plugins(args: argparse.Namespace) -> int:
+    """List discovered plugins."""
+    from bigbrain.config import load_config
+    from bigbrain.plugins.loader import PluginLoader
+
+    cfg = load_config()
+    loader = PluginLoader.from_config(cfg)
+    count = loader.load_all()
+
+    plugins = loader.list_plugins()
+
+    if not plugins:
+        print("No plugins discovered.")
+        print(f"  Plugin directory: {cfg.plugins.plugins_dir}")
+        print("  Place .py files with PluginBase subclasses in that directory.")
+        return 0
+
+    print(f"Discovered {count} plugin(s):")
+    print()
+    for info in plugins:
+        print(f"  {info.name} v{info.version} [{info.plugin_type}]")
+        if info.description:
+            print(f"    {info.description}")
+
+    loader.unload_all()
+    return 0
+
+
+def _add_plugins_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``plugins`` subcommand."""
+    p = subparsers.add_parser(
+        "plugins",
+        help="List discovered plugins",
+        description="Show installed and discovered BigBrain plugins.",
+    )
+    p.set_defaults(func=_handle_plugins)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -1372,6 +1411,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ask_parser(subparsers)
     _add_auth_parser(subparsers)
     _add_notion_parser(subparsers)
+    _add_plugins_parser(subparsers)
 
     return parser
 
