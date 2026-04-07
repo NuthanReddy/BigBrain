@@ -18,6 +18,7 @@ from bigbrain.distill.summarizer import Summarizer
 from bigbrain.kb.models import Document
 from bigbrain.kb.store import KBStore
 from bigbrain.logging_config import get_logger
+from bigbrain.progress import progress_bar
 from bigbrain.providers.registry import ProviderRegistry
 
 logger = get_logger(__name__)
@@ -241,12 +242,14 @@ class DistillPipeline:
         results: list[DistillResult] = []
 
         if self._workers <= 1 or len(docs) == 1:
-            for doc in docs:
-                try:
-                    results.append(self.distill_document(doc, model=model, force=force, steps=steps))
-                except Exception as exc:
-                    logger.error("Failed to distill %s: %s", doc.title, exc)
-                    results.append(DistillResult(document_id=doc.id, errors=[str(exc)]))
+            with progress_bar(len(docs), "Distilling") as update:
+                for doc in docs:
+                    try:
+                        results.append(self.distill_document(doc, model=model, force=force, steps=steps))
+                    except Exception as exc:
+                        logger.error("Failed to distill %s: %s", doc.title, exc)
+                        results.append(DistillResult(document_id=doc.id, errors=[str(exc)]))
+                    update(1)
             return results
 
         with ThreadPoolExecutor(max_workers=self._workers) as pool:

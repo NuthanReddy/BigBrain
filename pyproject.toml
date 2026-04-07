@@ -11,6 +11,8 @@ dependencies = [
     "notion-client>=2.0",
     "beautifulsoup4>=4.12",
     "html2text>=2024.2",
+    "tenacity>=8.0",
+    "rich>=13.0",
 ]
 
 [project.scripts]

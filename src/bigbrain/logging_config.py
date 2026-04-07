@@ -21,8 +21,11 @@ set to DEBUG.
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 __all__ = ["setup_logging", "get_logger", "UserError"]
 
@@ -38,12 +41,38 @@ _VALID_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 # Sentinel so we know whether setup_logging has already run.
 _logging_configured: bool = False
 
+
+# ---------------------------------------------------------------------------
+# JSON formatter
+# ---------------------------------------------------------------------------
+
+
+class JsonFormatter(logging.Formatter):
+    """Structured JSON log formatter."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0]:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_entry)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def setup_logging(level: str = "INFO", log_format: str = "console") -> None:
+def setup_logging(
+    level: str = "INFO",
+    log_format: str = "console",
+    log_file: str = "",
+    quiet: bool = False,
+) -> None:
     """Configure the root logger for the application.
 
     This function is **idempotent** – calling it more than once is a no-op
@@ -55,21 +84,13 @@ def setup_logging(level: str = "INFO", log_format: str = "console") -> None:
     level:
         One of DEBUG, INFO, WARNING, ERROR, CRITICAL (case-insensitive).
     log_format:
-        The output format to use.  Currently only ``"console"`` is
-        supported.
-
-        .. note::
-
-            **Extension point – file logging**: A ``"file"`` format option
-            could be added here to attach a ``logging.FileHandler`` that
-            writes to a configurable path.
-
-        .. note::
-
-            **Extension point – structured / JSON logging**: A ``"json"``
-            format option could be added here to emit structured log
-            records (e.g. using ``logging.Formatter`` subclass that
-            serialises to JSON).
+        ``"console"`` for human-readable output or ``"json"`` for
+        structured JSON records.
+    log_file:
+        Path to a log file.  When non-empty a ``FileHandler`` is added
+        (parent directories are created automatically).
+    quiet:
+        If ``True``, suppress console output (useful for scripts).
     """
     global _logging_configured  # noqa: PLW0603
 
@@ -87,15 +108,45 @@ def setup_logging(level: str = "INFO", log_format: str = "console") -> None:
     root_logger.setLevel(level)
 
     # Console handler ---------------------------------------------------------
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setLevel(level)
+    if not quiet:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(level)
 
-    formatter = logging.Formatter(fmt=_DEFAULT_FORMAT, datefmt=_DEFAULT_DATE_FORMAT)
-    handler.setFormatter(formatter)
+        if log_format == "json":
+            handler.setFormatter(JsonFormatter())
+        else:
+            handler.setFormatter(
+                logging.Formatter(fmt=_DEFAULT_FORMAT, datefmt=_DEFAULT_DATE_FORMAT)
+            )
 
-    root_logger.addHandler(handler)
+        root_logger.addHandler(handler)
+
+    # File handler ------------------------------------------------------------
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
+        file_handler.setLevel(level)
+
+        if log_format == "json":
+            file_handler.setFormatter(JsonFormatter())
+        else:
+            file_handler.setFormatter(
+                logging.Formatter(fmt=_DEFAULT_FORMAT, datefmt=_DEFAULT_DATE_FORMAT)
+            )
+
+        root_logger.addHandler(file_handler)
 
     _logging_configured = True
+
+
+def reset_logging() -> None:
+    """Reset logging configuration (for tests)."""
+    global _logging_configured  # noqa: PLW0603
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+    _logging_configured = False
 
 
 def get_logger(name: str) -> logging.Logger:

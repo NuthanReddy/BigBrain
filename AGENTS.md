@@ -49,6 +49,10 @@
 | `bigbrain.plugins.base` | `PluginBase`, `IngestPlugin`, `CompilePlugin`, `ProcessorPlugin` ABCs; `PluginInfo` dataclass |
 | `bigbrain.plugins.discovery` | `discover_from_directory()` – scans `.py` files for `PluginBase` subclasses; `discover_from_entry_points()` – loads `bigbrain.plugins` entry points |
 | `bigbrain.plugins.loader` | `PluginLoader` – discovers, validates, filters (enabled/disabled), and registers plugins with ingest registry |
+| `bigbrain.progress` | Progress bar context manager using rich (with graceful fallback); `print_status()` and `print_table()` helpers |
+| `bigbrain.retry` | `with_retry()` decorator with exponential backoff; `CircuitBreaker` for repeated failure protection |
+| `bigbrain.http` | `get_http_client()` – shared `httpx.Client` with connection pooling; `close_http_client()` teardown |
+| `bigbrain.validation` | Input validators: `validate_url()`, `validate_path()`, `validate_doc_id()`, `validate_model_name()`, `sanitize_text()` |
 
 ### Subpackages
 | Subpackage | Purpose |
@@ -61,6 +65,7 @@
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
 | `bigbrain.notion` | **Active (Phase 6)** – Bidirectional sync between KB and Notion workspace; import, export, and sync engine |
 | `bigbrain.plugins` | **Active (Phase 9)** – Extensible plugin system for custom ingesters, compilers, and processors; directory scanning + entry_points discovery |
+| (top-level modules) | **Active (Phase 10)** – Production hardening: `progress.py` (rich progress bars), `retry.py` (retry + circuit breaker), `http.py` (connection pooling), `validation.py` (input sanitization) |
 
 ### Ingestion Pipeline (Phase 1)
 1. `bigbrain.cli` parses `ingest --source <path>` and calls `bigbrain.ingest.service.ingest_path()`.
@@ -185,7 +190,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 9)
+## File Structure (Phase 10)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -208,6 +213,7 @@ BigBrain/
 │   ├── test_notion.py               # Notion client, importer, exporter, sync, KB mappings
 │   ├── test_orchestrator.py         # Change detector, orchestrator pipeline, KB file hashes
 │   ├── test_plugins.py              # Plugin base, discovery, loader, example plugins
+│   ├── test_hardening.py            # Progress, retry, HTTP pool, validation, logging tests
 │   ├── ingest/                      # Ingestion pipeline tests
 │   │   ├── test_discovery.py
 │   │   ├── test_registry.py
@@ -298,6 +304,10 @@ BigBrain/
 │           ├── base.py              # PluginBase, IngestPlugin, CompilePlugin, ProcessorPlugin ABCs
 │           ├── discovery.py         # Directory scanning + entry_points discovery
 │           └── loader.py            # PluginLoader – validate, filter, register
+│       ├── progress.py              # Progress bars with rich (graceful fallback)
+│       ├── retry.py                 # with_retry() decorator + CircuitBreaker
+│       ├── http.py                  # Shared httpx.Client with connection pooling
+│       └── validation.py            # Input validation (URLs, paths, doc IDs, model names)
 ├── plugins/                         # User plugin directory (auto-discovered)
 │   ├── csv_ingester.py              # Example: CSV file ingester
 │   └── html_compiler.py             # Example: HTML page compiler
@@ -306,7 +316,7 @@ BigBrain/
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–9)
+### Current (Phase 0–10)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3) and URL/API ingestion (Phase 8).
@@ -316,6 +326,8 @@ BigBrain/
 - **notion-client** (`>=2.0`) – Notion SDK for Python; page/block CRUD and search (Phase 6).
 - **beautifulsoup4** – HTML parsing for URL ingestion (Phase 8).
 - **html2text** – HTML-to-text conversion for URL ingestion (Phase 8).
+- **rich** – Progress bars, styled output, formatted tables (Phase 10).
+- **tenacity** – Retry with exponential backoff for AI provider calls (Phase 10).
 
 ### Future
 | Phase | Integration |
@@ -337,6 +349,6 @@ BigBrain/
 | 7 | Orchestrator | End-to-end pipeline, incremental updates ✅ |
 | 8 | Multi-source Ingestion | URL/web page ingestion and REST API JSON ingestion ✅ |
 | 9 | Plugin system | Extensible plugin architecture for custom ingesters, compilers, processors ✅ |
-| 10 | Production hardening | Progress bars, rich output, error recovery, performance optimization |
+| 10 | Production hardening | Progress bars, retry/circuit-breaker, HTTP pooling, input validation, enhanced logging ✅ |
 | 11 | Polyglot Entity Store | Pluggable distilled-entity/vector backends; keep SQLite default for local/dev |
 

@@ -10,6 +10,7 @@ from bigbrain.config import BigBrainConfig, load_config
 from bigbrain.kb.store import KBStore
 from bigbrain.logging_config import get_logger
 from bigbrain.orchestrator.change_detector import ChangeDetector
+from bigbrain.progress import progress_bar
 
 logger = get_logger(__name__)
 
@@ -140,20 +141,23 @@ class Orchestrator:
             files_to_ingest = discovery.files
 
         # Ingest changed files
-        for file_path in files_to_ingest:
-            ext = file_path.suffix.lower()
-            ingester = get_ingester(ext)
-            if ingester is None:
-                continue
-            try:
-                doc = ingester.ingest(file_path)
-                self._store.save_document(doc)
-                self._detector.save_file_record(file_path)
-                result.ingested += 1
-                logger.info("Ingested: %s", file_path)
-            except Exception as exc:
-                result.errors.append(f"ingest {file_path}: {exc}")
-                logger.error("Failed to ingest %s: %s", file_path, exc)
+        with progress_bar(len(files_to_ingest), "Ingesting") as update:
+            for file_path in files_to_ingest:
+                ext = file_path.suffix.lower()
+                ingester = get_ingester(ext)
+                if ingester is None:
+                    update(1)
+                    continue
+                try:
+                    doc = ingester.ingest(file_path)
+                    self._store.save_document(doc)
+                    self._detector.save_file_record(file_path)
+                    result.ingested += 1
+                    logger.info("Ingested: %s", file_path)
+                except Exception as exc:
+                    result.errors.append(f"ingest {file_path}: {exc}")
+                    logger.error("Failed to ingest %s: %s", file_path, exc)
+                update(1)
 
     def _run_distill(self, *, force: bool, model: str, result: OrchestratorResult) -> None:
         """Run distillation on KB documents."""

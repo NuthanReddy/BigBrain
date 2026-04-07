@@ -1394,6 +1394,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # Global logging options
+    parser.add_argument(
+        "--quiet", "-q", action="store_true", default=False,
+        help="Suppress log output",
+    )
+    parser.add_argument(
+        "--log-file", type=str, default="",
+        help="Write logs to a file",
+    )
+    parser.add_argument(
+        "--log-format", choices=["console", "json"], default="console",
+        help="Log output format (default: console)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", title="commands")
 
     _add_ingest_parser(subparsers)
@@ -1433,15 +1447,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     int
         Exit code – 0 on success, 1 on error.
     """
-    # Best-effort logging bootstrap; the module may not exist yet.
-    try:
-        from bigbrain.logging_config import setup_logging
-        setup_logging()
-    except ImportError:
-        pass
-
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Configure logging using parsed CLI flags.
+    try:
+        from bigbrain.logging_config import setup_logging
+        setup_logging(
+            quiet=getattr(args, "quiet", False),
+            log_file=getattr(args, "log_file", ""),
+            log_format=getattr(args, "log_format", "console"),
+        )
+    except ImportError:
+        pass
 
     if args.command is None:
         parser.print_help()

@@ -4,7 +4,11 @@ src/bigbrain/__init__.py
 src/bigbrain/cli.py
 src/bigbrain/config.py
 src/bigbrain/errors.py
+src/bigbrain/http.py
 src/bigbrain/logging_config.py
+src/bigbrain/progress.py
+src/bigbrain/retry.py
+src/bigbrain/validation.py
 src/bigbrain.egg-info/PKG-INFO
 src/bigbrain.egg-info/SOURCES.txt
 src/bigbrain.egg-info/dependency_links.txt
@@ -27,6 +31,7 @@ src/bigbrain/distill/pipeline.py
 src/bigbrain/distill/relationships.py
 src/bigbrain/distill/summarizer.py
 src/bigbrain/ingest/__init__.py
+src/bigbrain/ingest/api_ingester.py
 src/bigbrain/ingest/discovery.py
 src/bigbrain/ingest/markdown_ingester.py
 src/bigbrain/ingest/pdf_ingester.py
@@ -34,6 +39,7 @@ src/bigbrain/ingest/python_ingester.py
 src/bigbrain/ingest/registry.py
 src/bigbrain/ingest/service.py
 src/bigbrain/ingest/text_ingester.py
+src/bigbrain/ingest/url_ingester.py
 src/bigbrain/kb/__init__.py
 src/bigbrain/kb/models.py
 src/bigbrain/kb/service.py
@@ -46,6 +52,10 @@ src/bigbrain/notion/sync.py
 src/bigbrain/orchestrator/__init__.py
 src/bigbrain/orchestrator/change_detector.py
 src/bigbrain/orchestrator/pipeline.py
+src/bigbrain/plugins/__init__.py
+src/bigbrain/plugins/base.py
+src/bigbrain/plugins/discovery.py
+src/bigbrain/plugins/loader.py
 src/bigbrain/providers/__init__.py
 src/bigbrain/providers/base.py
 src/bigbrain/providers/config.py
@@ -68,5 +78,6 @@ tests/test_kb_service.py
 tests/test_kb_store.py
 tests/test_notion.py
 tests/test_orchestrator.py
+tests/test_plugins.py
 tests/test_providers.py
 tests/test_rag.py

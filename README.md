@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 9 – Plugin System.** Extensible plugin architecture for custom ingesters and compilers. All previous phases active.
+**Phase 10 – Production Hardening.** Progress bars, retry logic, performance optimization, enhanced logging, input validation.
 
 ## Quick Start
 
@@ -437,6 +437,27 @@ bigbrain plugins
 - `csv_ingester` — Ingest CSV files as structured documents
 - `html_compiler` — Export knowledge as standalone HTML pages
 
+## Production Features (Phase 10)
+
+### Progress Bars
+Multi-file operations show progress bars (powered by [rich](https://github.com/Textualize/rich)):
+```bash
+bigbrain distill    # Shows progress bar for multi-doc distillation
+bigbrain update --source docs/   # Shows ingestion progress
+```
+
+### Logging Options
+```bash
+bigbrain --quiet ingest --source docs/     # Suppress log output
+bigbrain --log-file app.log distill        # Log to file
+bigbrain --log-format json status          # Structured JSON logs
+```
+
+### Retry & Resilience
+- AI provider calls retry with exponential backoff
+- Circuit breaker prevents repeated calls to failing providers
+- Connection pooling for HTTP requests
+
 ## Configuration
 
 1. Copy `config/example.yaml` and customize for your environment.
@@ -514,10 +535,14 @@ BigBrain/
 │   │   ├── importer.py    # Import Notion pages to KB
 │   │   ├── exporter.py    # Export KB content to Notion
 │   │   └── sync.py        # Bidirectional sync engine
-│   └── plugins/           # Plugin system (Phase 9 ✅)
-│       ├── base.py        # PluginBase, IngestPlugin, CompilePlugin, ProcessorPlugin ABCs
-│       ├── discovery.py   # Directory scanning + entry_points discovery
-│       └── loader.py      # PluginLoader – validate, filter, register
+│   ├── plugins/           # Plugin system (Phase 9 ✅)
+│   │   ├── base.py        # PluginBase, IngestPlugin, CompilePlugin, ProcessorPlugin ABCs
+│   │   ├── discovery.py   # Directory scanning + entry_points discovery
+│   │   └── loader.py      # PluginLoader – validate, filter, register
+│   ├── progress.py        # Progress bars with rich fallback (Phase 10 ✅)
+│   ├── retry.py           # Retry decorator + circuit breaker (Phase 10 ✅)
+│   ├── http.py            # Shared httpx connection pool (Phase 10 ✅)
+│   └── validation.py      # Input validation helpers (Phase 10 ✅)
 ├── plugins/               # User plugin directory (auto-discovered)
 │   ├── csv_ingester.py    # Example: CSV file ingester
 │   └── html_compiler.py   # Example: HTML page compiler
@@ -540,7 +565,7 @@ BigBrain/
 ### Running Tests
 
 ```bash
-# Run full test suite (426+ tests)
+# Run full test suite (479+ tests)
 python -m pytest tests/ -v
 
 # Run by module
@@ -553,6 +578,7 @@ python -m pytest tests/test_compile.py -v  # Compilation
 python -m pytest tests/test_notion.py -v   # Notion integration
 python -m pytest tests/test_orchestrator.py -v # Orchestrator pipeline
 python -m pytest tests/test_plugins.py -v  # Plugin system
+python -m pytest tests/test_hardening.py -v # Production hardening
 ```
 
 ## Phase Roadmap
@@ -569,7 +595,7 @@ python -m pytest tests/test_plugins.py -v  # Plugin system
 | 7     | Incremental updates and knowledge base search     ✅  |
 | 8     | Multi-source ingestion (URLs, APIs)          ✅   |
 | 9     | Plugin system and extensibility               ✅   |
-| 10    | Production hardening and performance optimization |
+| 10    | Production hardening and performance optimization ✅ |
 | 11    | Polyglot entity store (Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |
 
 ### Planned Phase 11 Scope

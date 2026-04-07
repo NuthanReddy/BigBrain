@@ -572,6 +572,17 @@ def load_env_overrides() -> dict[str, Any]:
 # Main loader
 # ---------------------------------------------------------------------------
 
+_config_cache: BigBrainConfig | None = None
+_config_cache_path: str | None = None
+
+
+def clear_config_cache() -> None:
+    """Clear the config cache (useful for tests)."""
+    global _config_cache, _config_cache_path
+    _config_cache = None
+    _config_cache_path = None
+
+
 def load_config(config_path: str | None = None) -> BigBrainConfig:
     """Build a ``BigBrainConfig`` by merging defaults → YAML → env vars.
 
@@ -586,6 +597,13 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
     BigBrainConfig
         Fully merged configuration object.
     """
+    global _config_cache, _config_cache_path
+
+    # Return cached config if path matches
+    effective_path = config_path or "config/example.yaml"
+    if _config_cache is not None and _config_cache_path == effective_path:
+        return _config_cache
+
     # 1. Start with built-in defaults
     defaults = BigBrainConfig()
 
@@ -706,4 +724,7 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
             merged[f.name] = yaml_values[f.name]
         # else: dataclass default is used automatically
 
-    return BigBrainConfig(**merged)
+    result = BigBrainConfig(**merged)
+    _config_cache = result
+    _config_cache_path = effective_path
+    return result
