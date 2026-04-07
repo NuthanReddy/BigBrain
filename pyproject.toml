@@ -1,6 +1,20 @@
 [project]
 name = "bigbrain"
 version = "0.1.0"
-description = "Add your description here"
+description = "A knowledge compiler that ingests, distills, and compiles knowledge from multiple sources."
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0",
+    "pymupdf>=1.23",
+    "pypdf>=3.0",
+]
+
+[project.scripts]
+bigbrain = "bigbrain.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
