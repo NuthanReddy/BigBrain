@@ -1,8 +1,17 @@
 # BigBrain Phase 4 Implementation Task List
+<!-- PLAN:TEMPLATE v1 -->
+<!-- PLAN:SOURCE .github/plan/_phase-task-template.md -->
+
 
 ## Goal
 
 Implement the **distillation pipeline** that transforms stored raw documents into reusable knowledge units, with summaries as the first polished user-facing artifact.
+
+## Validation Snapshot (2026-04-08)
+
+- Status key: `[x] done`, `[ ] pending/partial`
+- Validation basis: code + tests in `src/bigbrain/distill/`, `src/bigbrain/cli.py`, `src/bigbrain/kb/store.py`, and `tests/test_distill.py`
+- Overall: Phase 4 is largely implemented and usable end-to-end; remaining gaps are mostly around explicit normalization and summary-mode/quality controls.
 
 ---
 
@@ -38,9 +47,9 @@ After shared distillation contracts are defined, the following can proceed in pa
 
 ## Phase 2–3 Carry-Over Issues / Preconditions
 
-- [ ] KB store APIs exist for reading source documents and writing distilled artifacts later
-- [ ] provider layer exists and is invocable through one routing path
-- [ ] provenance metadata is available from upstream phases
+- [x] KB store APIs exist for reading source documents and writing distilled artifacts later
+- [x] provider layer exists and is invocable through one routing path
+- [x] provenance metadata is available from upstream phases
 
 ### Minimum preflight acceptance criteria
 - stored documents can be fetched reliably for distillation
@@ -64,10 +73,10 @@ After shared distillation contracts are defined, the following can proceed in pa
 ## Workstream A - Distillation Contracts
 
 ### Tasks
-- [ ] Define models for chunks, summaries, entities, and relationships
-- [ ] Define provenance fields linking outputs back to source docs/chunks
-- [ ] Define confidence metadata and quality markers
-- [ ] Define pipeline configuration contract
+- [x] Define models for chunks, summaries, entities, and relationships
+- [x] Define provenance fields linking outputs back to source docs/chunks
+- [x] Define confidence metadata and quality markers
+- [x] Define pipeline configuration contract
 
 ### Suggested files
 - `src/bigbrain/distill/models.py`
@@ -82,10 +91,10 @@ After shared distillation contracts are defined, the following can proceed in pa
 ## Workstream B - Chunking and Normalization
 
 ### Tasks
-- [ ] Implement chunking strategies
-- [ ] Implement overlap rules
-- [ ] Implement normalization rules for text cleanup
-- [ ] Preserve source offsets or section references
+- [x] Implement chunking strategies
+- [x] Implement overlap rules
+- [ ] Implement normalization rules for text cleanup *(no dedicated `normalizer.py` yet)*
+- [x] Preserve source offsets or section references
 
 ### Suggested files
 - `src/bigbrain/distill/chunker.py`
@@ -100,8 +109,8 @@ After shared distillation contracts are defined, the following can proceed in pa
 ## Workstream C - Summary Generation
 
 ### Tasks
-- [ ] Implement extractive summary generation
-- [ ] Implement abstractive summary orchestration via Phase 3 provider layer
+- [ ] Implement extractive summary generation *(provider summary exists; no standalone extractive algorithm yet)*
+- [x] Implement abstractive summary orchestration via Phase 3 provider layer
 - [ ] Support `extractive`, `abstractive`, and `both` modes
 - [ ] Add quality heuristics or validation checks
 
@@ -119,10 +128,10 @@ After shared distillation contracts are defined, the following can proceed in pa
 ## Workstream D - Entity Extraction and Relationships
 
 ### Tasks
-- [ ] Implement entity extraction rules/provider-assisted flow
-- [ ] Implement relationship-building logic
-- [ ] Define confidence thresholds
-- [ ] Add deduping/normalization for repeated entities
+- [x] Implement entity extraction rules/provider-assisted flow
+- [x] Implement relationship-building logic
+- [ ] Define confidence thresholds *(relationship confidence field exists; thresholding policy/config not defined)*
+- [x] Add deduping/normalization for repeated entities
 
 ### Suggested files
 - `src/bigbrain/distill/entity_extractor.py`
@@ -137,10 +146,10 @@ After shared distillation contracts are defined, the following can proceed in pa
 ## Workstream E - Pipeline Orchestration and Evaluation
 
 ### Tasks
-- [ ] Assemble the distillation pipeline over stored documents
-- [ ] Add pipeline-level reporting and counts
-- [ ] Add evaluation fixtures and golden outputs where practical
-- [ ] Add CLI integration for `distill`
+- [x] Assemble the distillation pipeline over stored documents
+- [x] Add pipeline-level reporting and counts
+- [ ] Add evaluation fixtures and golden outputs where practical *(broad pytest coverage exists; golden fixtures are still pending)*
+- [x] Add CLI integration for `distill`
 
 ### Suggested files
 - `src/bigbrain/distill/pipeline.py`
@@ -156,13 +165,26 @@ After shared distillation contracts are defined, the following can proceed in pa
 
 ## Definition of Done for Phase 4
 
-- [ ] stable distillation models exist
-- [ ] chunking and normalization work
-- [ ] summary-first output is generated in configured modes
-- [ ] entities and relationships are extracted with metadata
-- [ ] outputs preserve provenance to source chunks
-- [ ] `distill` CLI execution is usable
-- [ ] fixtures/tests cover major paths
+- [x] stable distillation models exist
+- [ ] chunking and normalization work *(normalization module still pending)*
+- [ ] summary-first output is generated in configured modes *(mode switching not yet implemented)*
+- [x] entities and relationships are extracted with metadata
+- [x] outputs preserve provenance to source chunks
+- [x] `distill` CLI execution is usable
+- [x] fixtures/tests cover major paths
+
+---
+
+## Additional Achieved Tasks (Beyond Original Checklist)
+
+- [x] Incremental distillation with chunk hash comparison (`KBStore.get_chunk_hashes` + `DistillPipeline` skip logic)
+- [x] Parallel execution within document processing (summary and entity extraction in parallel)
+- [x] Parallel execution across documents with configurable worker pool (`distill --workers`)
+- [x] Partial-step execution support (`distill --step summarize|entities|relationships`)
+- [x] Distillation inspection and maintenance CLI commands:
+  - `distill-show` for persisted summaries/entities/relationships
+  - `entities` for filtering/listing entity inventory
+  - `compact` for KB entity deduplication
 
 ---
 

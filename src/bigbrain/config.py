@@ -71,6 +71,17 @@ class DistillConfig:
 
 
 @dataclass
+class CompileConfig:
+    """Configuration for the knowledge compilation pipeline."""
+    output_dir: str = "build"  # directory for compiled output files
+    default_format: str = "markdown"  # markdown, flashcard, cheatsheet, qa, study_guide
+    flashcard_count: int = 20  # max flashcards per document
+    qa_count: int = 15  # max Q&A pairs per document
+    include_relationships: bool = True
+    include_entities: bool = True
+
+
+@dataclass
 class BigBrainConfig:
     """Central configuration object for the BigBrain application."""
 
@@ -95,6 +106,9 @@ class BigBrainConfig:
 
     # distillation
     distillation: DistillConfig = field(default_factory=DistillConfig)
+
+    # compile
+    compile: CompileConfig = field(default_factory=CompileConfig)
 
     # kb
     kb: KBConfig = field(default_factory=KBConfig)
@@ -181,6 +195,19 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
         flat["distillation"] = DistillConfig(**{
             **{f.name: getattr(dist_defaults, f.name) for f in fields(DistillConfig)},
             **dist_kwargs,
+        })
+
+    # Special handling for compile → CompileConfig
+    if "compile" in yaml_data and isinstance(yaml_data["compile"], dict):
+        comp_data = yaml_data["compile"]
+        comp_defaults = CompileConfig()
+        comp_kwargs = {}
+        for comp_field in fields(CompileConfig):
+            if comp_field.name in comp_data:
+                comp_kwargs[comp_field.name] = comp_data[comp_field.name]
+        flat["compile"] = CompileConfig(**{
+            **{f.name: getattr(comp_defaults, f.name) for f in fields(CompileConfig)},
+            **comp_kwargs,
         })
 
     # Special handling for providers → ProviderConfig
@@ -272,6 +299,7 @@ _INGESTION_ENV_PREFIX = "BIGBRAIN_INGESTION_"
 _KB_ENV_PREFIX = "BIGBRAIN_KB_"
 _PROVIDERS_ENV_PREFIX = "BIGBRAIN_PROVIDERS_"
 _DISTILL_ENV_PREFIX = "BIGBRAIN_DISTILL_"
+_COMPILE_ENV_PREFIX = "BIGBRAIN_COMPILE_"
 
 # Fields whose env values should be interpreted as booleans.
 _BOOL_FIELDS: set[str] = {f.name for f in fields(BigBrainConfig) if f.type == "bool"}
@@ -300,6 +328,15 @@ _DISTILL_BOOL_FIELDS: set[str] = {
 }
 _DISTILL_INT_FIELDS: set[str] = {
     f.name for f in fields(DistillConfig) if f.type == "int"
+}
+
+# CompileConfig field metadata for type coercion
+_COMPILE_VALID_FIELDS: set[str] = {f.name for f in fields(CompileConfig)}
+_COMPILE_BOOL_FIELDS: set[str] = {
+    f.name for f in fields(CompileConfig) if f.type == "bool"
+}
+_COMPILE_INT_FIELDS: set[str] = {
+    f.name for f in fields(CompileConfig) if f.type == "int"
 }
 
 
@@ -344,6 +381,7 @@ def load_env_overrides() -> dict[str, Any]:
     kb_overrides: dict[str, Any] = {}
     providers_overrides: dict[str, Any] = {}
     distill_overrides: dict[str, Any] = {}
+    compile_overrides: dict[str, Any] = {}
 
     for key, value in os.environ.items():
         if not key.startswith(_ENV_PREFIX):
@@ -394,6 +432,19 @@ def load_env_overrides() -> dict[str, Any]:
                 distill_overrides[dist_field] = value
             continue
 
+        # Check for BIGBRAIN_COMPILE_*
+        if key.startswith(_COMPILE_ENV_PREFIX):
+            comp_field = key[len(_COMPILE_ENV_PREFIX):].lower()
+            if comp_field not in _COMPILE_VALID_FIELDS:
+                continue
+            if comp_field in _COMPILE_BOOL_FIELDS:
+                compile_overrides[comp_field] = _coerce_bool(value)
+            elif comp_field in _COMPILE_INT_FIELDS:
+                compile_overrides[comp_field] = int(value)
+            else:
+                compile_overrides[comp_field] = value
+            continue
+
         # Top-level BIGBRAIN_* fields
         field_name = key[len(_ENV_PREFIX):].lower()
         if field_name not in _VALID_FIELD_NAMES:
@@ -411,6 +462,8 @@ def load_env_overrides() -> dict[str, Any]:
         overrides["providers"] = providers_overrides
     if distill_overrides:
         overrides["distillation"] = distill_overrides
+    if compile_overrides:
+        overrides["compile"] = compile_overrides
 
     return overrides
 
@@ -490,6 +543,20 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["distillation"] = DistillConfig(**dist_kwargs)
             elif "distillation" in yaml_values:
                 merged["distillation"] = base_dist
+            # else: dataclass default is used automatically
+        elif f.name == "compile":
+            # Special merge: defaults → YAML → env (field-level)
+            base_comp = yaml_values.get("compile", CompileConfig())
+            env_comp = env_values.get("compile")
+            if env_comp:
+                comp_kwargs = {
+                    fld.name: getattr(base_comp, fld.name)
+                    for fld in fields(CompileConfig)
+                }
+                comp_kwargs.update(env_comp)
+                merged["compile"] = CompileConfig(**comp_kwargs)
+            elif "compile" in yaml_values:
+                merged["compile"] = base_comp
             # else: dataclass default is used automatically
         elif f.name == "providers":
             # Special merge: defaults → YAML → env (field-level)

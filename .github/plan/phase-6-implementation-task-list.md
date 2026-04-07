@@ -1,13 +1,23 @@
 # BigBrain Phase 6 Implementation Task List
+<!-- PLAN:TEMPLATE v1 -->
+<!-- PLAN:SOURCE .github/plan/_phase-task-template.md -->
+
 
 ## Goal
 
-Implement **Notion bidirectional page sync** for summary outputs.
+Implement **Notion MCP-based bidirectional page sync** for summary outputs.
 
 This phase should support:
-- publishing compiled summaries into Notion pages
-- re-ingesting synced Notion pages back into the KB
+- publishing compiled summaries into Notion pages (BigBrain -> Notion)
+- re-ingesting synced Notion pages back into the KB (Notion -> BigBrain)
 - tracking sync metadata, cursors, remote IDs, and conflicts
+- idempotent upserts and deterministic reconciliation for repeated runs
+
+### Notion MCP Assumptions
+- Use Notion MCP operations as the **mandatory** integration path (`search`, `fetch`, `create-pages`, `update-page`, optional comments/views).
+- Start with **page-level sync MVP**; database-level sync can follow later.
+- Treat MCP schema/format contracts as external dependencies that may evolve.
+- Publish target is a caller-provided Notion page; default output page is `Big Brain` when no target is provided.
 
 ---
 
@@ -15,8 +25,8 @@ This phase should support:
 
 After sync contracts are defined, these workstreams can proceed with limited coupling:
 - Notion page mapping model
-- outbound publish adapter
-- inbound reconciliation adapter
+- outbound MCP publish adapter
+- inbound MCP reconciliation adapter
 - sync state/conflict handling
 - CLI/config/docs/tests
 
@@ -25,16 +35,17 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 ## Scope Boundaries
 
 ### In scope
-- Notion page mapping contracts
-- outbound page publishing
-- inbound page re-ingest/reconciliation
+- Notion MCP page mapping contracts
+- outbound page publishing via MCP
+- inbound page re-ingest/reconciliation via MCP
 - sync metadata/state tracking
 - conflict detection and retry strategy
 - CLI/config integration
+- publish to a specific Notion page with default fallback (`Big Brain`)
 
 ### Out of scope
 - generic multi-target sync
-- Notion database sync
+- full Notion database sync (defer to follow-up phase)
 - UI sync dashboards
 
 ---
@@ -44,22 +55,24 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - [ ] compiled summary outputs are stable
 - [ ] summary provenance is preserved in compiled artifacts
 - [ ] config can already store provider/integration settings
+- [ ] Notion MCP access/auth setup is available in target environments
 
 ### Minimum preflight acceptance criteria
 - Phase 5 outputs can be selected deterministically for publish/reconcile
 - Notion credentials/config can be loaded safely
+- one MCP-backed connectivity check can succeed before sync execution
 
 ---
 
 ## Recommended Implementation Order
 
 0. Close summary artifact and config blockers
-1. Define Notion sync contracts and mapping rules
-2. Implement outbound publish flow
-3. Implement inbound pull/re-ingest flow
+1. Define Notion MCP sync contracts and mapping rules
+2. Implement outbound MCP publish flow
+3. Implement inbound MCP pull/re-ingest flow
 4. Implement sync state and conflict handling
 5. Wire CLI and reporting
-6. Add fixtures/docs/tests
+6. Add fixtures/docs/tests + risk hardening
 
 ---
 
@@ -70,24 +83,29 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - [ ] Define mapping from compiled summary artifact -> Notion page
 - [ ] Define remote ID, sync cursor, and timestamp fields
 - [ ] Define conflict states and resolution markers
+- [ ] Define MCP payload adapters (BigBrain markdown/content <-> Notion page content)
 
 ### Suggested files
 - `src/bigbrain/compile/notion_models.py`
 - `src/bigbrain/sync/notion_mapping.py`
+- `src/bigbrain/sync/notion_mcp_adapter.py`
 
 ### Acceptance criteria
 - page sync inputs/outputs are stable and explicit
 - sync state is represented in a reusable contract
+- mapper/adapters are deterministic across repeated round-trips
 
 ---
 
 ## Workstream B - Outbound Publish
 
 ### Tasks
-- [ ] Implement Notion page publish client/service
+- [ ] Implement Notion MCP page publish client/service
 - [ ] Preserve source links and metadata
 - [ ] Support idempotent or update-aware publishing
 - [ ] Add retry behavior for transient failures
+- [ ] Add preflight MCP auth/capability check before publishing
+- [ ] Add target page routing (`--page`) with default output page `Big Brain`
 
 ### Suggested files
 - `src/bigbrain/compile/notion_compiler.py`
@@ -97,16 +115,19 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - summaries can be published to Notion pages
 - repeated publishes do not create uncontrolled duplication
 - publish failures are actionable and retryable
+- each local artifact has stable remote page mapping after first publish
+- when no explicit target is provided, publish defaults to Notion page `Big Brain`
 
 ---
 
 ## Workstream C - Inbound Pull and Reconciliation
 
 ### Tasks
-- [ ] Implement Notion page fetch/re-ingest flow
+- [ ] Implement Notion MCP page fetch/re-ingest flow
 - [ ] Map remote page updates back into KB-compatible structures
 - [ ] Preserve provenance and sync state
 - [ ] Add reconciliation hooks for local/remote divergence
+- [ ] Track last pulled remote revision marker for incremental pull
 
 ### Suggested files
 - `src/bigbrain/sync/notion_pull.py`
@@ -116,6 +137,7 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - previously synced pages can be re-imported
 - page changes are visible to the KB layer
 - reconciliation flow is deterministic
+- incremental pull skips unchanged remote pages safely
 
 ---
 
@@ -126,6 +148,7 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - [ ] Detect conflicts using timestamps/version markers/content hashes
 - [ ] Define retry strategy and user-facing conflict reporting
 - [ ] Add sync audit logging
+- [ ] Define explicit policy for conflict resolution (`last-write-wins` or manual)
 
 ### Suggested files
 - `src/bigbrain/sync/notion_state.py`
@@ -135,6 +158,7 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - sync state survives across runs
 - conflicts are visible and actionable
 - retries do not hide permanent failures
+- conflict policy is documented and applied consistently by CLI flows
 
 ---
 
@@ -145,6 +169,8 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - [ ] Update config example with Notion settings
 - [ ] Add publish/pull/conflict fixtures or mocks
 - [ ] Update README and AGENTS guidance
+- [ ] Add operator commands for dry-run and status (`sync status`, `sync push`, `sync pull`, `sync reconcile`)
+- [ ] Document/implement `sync push --page <page>` target override and default page behavior
 
 ### Suggested files
 - `src/bigbrain/cli.py`
@@ -157,6 +183,7 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - users can publish and sync back through the CLI
 - docs explain what page-level sync means
 - tests cover publish, pull, and conflict cases
+- dry-run/reporting output is sufficient to troubleshoot failed sync runs
 
 ---
 
@@ -168,6 +195,17 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 - [ ] sync metadata and conflicts are tracked
 - [ ] sync CLI flows are usable
 - [ ] tests/docs cover page-level bidirectional sync
+- [ ] MCP-based preflight checks and retry behavior are implemented
+
+---
+
+## Risks and Mitigations
+
+- [ ] MCP auth/token/session expiry handling validated with clear recovery guidance
+- [ ] MCP schema drift risk addressed via adapter layer and contract tests
+- [ ] rate limiting/backoff policy validated for publish and pull loops
+- [ ] markdown/block round-trip loss characterized with known limitations documented
+- [ ] duplicate mapping race conditions covered by idempotent upsert rules
 
 ---
 
@@ -179,14 +217,16 @@ After sync contracts are defined, these workstreams can proceed with limited cou
 ### Slice 1
 - sync contracts
 - mapping rules
+- MCP adapters
 
 ### Slice 2
-- outbound publish
+- outbound MCP publish + preflight
 
 ### Slice 3
-- inbound reconciliation
+- inbound MCP reconciliation
 - sync state/conflicts
 
 ### Slice 4
 - CLI/docs/tests
+- risk hardening and recovery docs
 

@@ -215,7 +215,71 @@ def _print_distill_result(result):
 
 
 def _handle_compile(args: argparse.Namespace) -> int:
-    print("⚠ 'compile' is not implemented yet. This command will be available in Phase 3.")
+    """Compile distilled content into output formats."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        print("  Run 'bigbrain ingest' then 'bigbrain distill' first.")
+        return 1
+
+    from bigbrain.compile.pipeline import CompilePipeline
+
+    fmt = args.format
+    model = args.model if hasattr(args, 'model') and args.model else ""
+    output = getattr(args, 'output', '') or ''
+
+    try:
+        with CompilePipeline.from_config(cfg) as pipeline:
+            if args.doc_id:
+                print(f"Compiling {args.doc_id} as {fmt}...")
+                result = pipeline.compile_document(
+                    args.doc_id, format=fmt, model=model, output_path=output,
+                )
+                if result is None:
+                    print(f"Document not found: {args.doc_id}")
+                    return 1
+
+                out_path = result.metadata.get("output_path", output or "stdout")
+                print(f"✓ Compiled: {result.title}")
+                print(f"  Format: {fmt}")
+                print(f"  Output: {out_path}")
+                if result.flashcards:
+                    print(f"  Flashcards: {len(result.flashcards)}")
+                if result.qa_pairs:
+                    print(f"  Q&A pairs: {len(result.qa_pairs)}")
+                if result.generated_by_provider:
+                    print(f"  Provider: {result.generated_by_provider}/{result.generated_by_model}")
+            else:
+                source_type = args.type if hasattr(args, 'type') and args.type else None
+                print(f"Compiling all documents as {fmt}...")
+                compile_result = pipeline.compile_all(
+                    format=fmt, model=model, source_type=source_type,
+                )
+
+                print()
+                print(f"Compilation complete:")
+                print(f"  Documents: {compile_result.total_documents}")
+                print(f"  Outputs:   {len(compile_result.outputs)}")
+                if compile_result.errors:
+                    print(f"  Errors:    {len(compile_result.errors)}")
+
+                if compile_result.outputs:
+                    print()
+                    for out in compile_result.outputs:
+                        path = out.metadata.get("output_path", "")
+                        print(f"  ✓ {out.title}")
+                        if path:
+                            print(f"    → {path}")
+
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     return 0
 
 
@@ -816,13 +880,29 @@ def _add_compile_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
     p = subparsers.add_parser(
         "compile",
         help="Compile knowledge base into output formats",
-        description="Compile knowledge base into output formats.",
+        description="Render distilled content as markdown, flashcards, cheatsheets, Q&A, or study guides.",
     )
     p.add_argument(
-        "--format",
-        choices=["markdown", "cheatsheet", "flashcard", "qa"],
+        "--format", "-f",
+        choices=["markdown", "flashcard", "cheatsheet", "qa", "study_guide"],
         default="markdown",
         help="Output format (default: markdown)",
+    )
+    p.add_argument(
+        "--doc-id", type=str, default="",
+        help="Compile a specific document by ID (default: compile all)",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter documents by source type",
+    )
+    p.add_argument(
+        "--model", type=str, default="",
+        help="Override the AI model (for flashcard, qa, study_guide)",
+    )
+    p.add_argument(
+        "--output", "-o", type=str, default="",
+        help="Output file path (default: auto-generate in build/ directory)",
     )
     p.set_defaults(func=_handle_compile)
     return p

@@ -66,6 +66,15 @@ distillation:
   relationship_extraction: true
   max_chunks_per_doc: 50
 
+# Compilation settings (Phase 5)
+compile:
+  output_dir: build
+  default_format: markdown       # markdown | flashcard | cheatsheet | qa | study_guide
+  flashcard_count: 20
+  qa_count: 15
+  include_relationships: true
+  include_entities: true
+
 # Knowledge Base settings (Phase 2)
 kb:
   backend: sqlite

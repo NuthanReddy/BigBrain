@@ -12,7 +12,7 @@
 
 ### Call Chain
 1. `main.py` → `bigbrain.cli.main()` → argparse dispatch → subcommand handlers.
-2. Startup sequence: parse args → `load_config()` → `setup_logging()` → run subcommand.
+2. Startup sequence: `setup_logging()` → parse args → subcommand handler calls `load_config()` as needed → run subcommand.
 
 ### Key Modules
 | Module | Responsibility |
@@ -122,7 +122,7 @@ python main.py ingest --source ./docs --type pdf
 ### Configuration
 - Example config: `config/example.yaml`
 - Override any setting with `BIGBRAIN_*` environment variables.
-- Pass a custom config file: `python main.py --config path/to/config.yaml`
+- Config is loaded per-command (each handler calls `load_config()` internally).
 
 ### Testing
 - Tests use **pytest** (`python -m pytest tests/ -v`).
@@ -142,7 +142,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 3B)
+## File Structure (Phase 5)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -154,11 +154,14 @@ BigBrain/
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py                  # sys.path setup for src/ layout
-│   ├── test_config.py               # Config loading, env overrides, KBConfig
+│   ├── test_config.py               # Config loading, env overrides, KBConfig, DistillConfig, CompileConfig
 │   ├── test_errors.py               # Error hierarchy and messages
 │   ├── test_kb_store.py             # KBStore CRUD, upsert, FTS5, JSONL, edge cases
 │   ├── test_kb_service.py           # KBService integration tests
-│   ├── test_providers.py            # Provider mocked HTTP tests + registry fallback
+│   ├── test_providers.py            # Provider mocked HTTP tests + registry fallback + GitHub auth
+│   ├── test_rag.py                  # RAG pipeline: retriever, context, prompts, pipeline
+│   ├── test_distill.py              # Chunker, summarizer, entities, relationships, pipeline
+│   ├── test_compile.py              # Compilers, pipeline, config
 │   ├── ingest/                      # Ingestion pipeline tests
 │   │   ├── test_discovery.py
 │   │   ├── test_registry.py
@@ -181,9 +184,9 @@ BigBrain/
 │   └── bigbrain/
 │       ├── __init__.py              # Package root, __version__
 │       ├── cli.py                   # Argparse CLI with subcommand dispatch
-│       ├── config.py                # load_config(), BigBrainConfig dataclass
+│       ├── config.py                # load_config(), BigBrainConfig, IngestionConfig, KBConfig, DistillConfig, CompileConfig
 │       ├── logging_config.py        # setup_logging(), get_logger()
-│       ├── errors.py                # UserError, IngestionError, UnsupportedFormatError, FileAccessError, ConfigError
+│       ├── errors.py                # UserError, IngestionError, ProviderError, etc.
 │       ├── orchestrator/
 │       │   └── __init__.py          # Placeholder – workflow orchestration
 │       ├── ingest/
@@ -198,7 +201,7 @@ BigBrain/
 │       ├── kb/
 │       │   ├── __init__.py          # Knowledge base subpackage
 │       │   ├── models.py            # Document, SourceMetadata, DocumentSection, IngestionResult
-│       │   ├── store.py             # KBStore – SQLite persistence, FTS5 search, ingestion runs
+│       │   ├── store.py             # KBStore – SQLite persistence, FTS5, distill tables, JSONL
 │       │   └── service.py           # KBService – high-level API for later phases
 │       ├── providers/
 │       │   ├── __init__.py          # Provider subpackage
@@ -207,43 +210,65 @@ BigBrain/
 │       │   ├── registry.py          # ProviderRegistry – preferred provider routing + fallback
 │       │   ├── ollama.py            # OllamaProvider – native REST API client
 │       │   ├── lm_studio.py         # LMStudioProvider – OpenAI-compatible client
-│       │   ├── github_copilot.py    # GitHubCopilotProvider – OpenAI-compatible client
-│       │   └── github_auth.py       # GitHub token discovery and authentication
+│       │   ├── github_copilot.py    # GitHubCopilotProvider – with retry + rate limit handling
+│       │   └── github_auth.py       # OAuth device flow, token caching, validation
+│       ├── rag/
+│       │   ├── __init__.py          # RAG pipeline exports
+│       │   ├── retriever.py         # KB search + chunk extraction
+│       │   ├── context.py           # Context assembly with char budget
+│       │   ├── prompts.py           # Prompt templates (QA, summarize, explain)
+│       │   └── pipeline.py          # RAGPipeline – retrieve→assemble→generate
 │       ├── distill/
-│       │   └── __init__.py          # Placeholder – distillation pipeline
+│       │   ├── __init__.py          # Distillation exports
+│       │   ├── models.py            # Chunk, Summary, Entity, Relationship, DistillResult
+│       │   ├── chunker.py           # Chunking strategies (section, sliding window, paragraph)
+│       │   ├── summarizer.py        # AI-powered summarization
+│       │   ├── entities.py          # AI entity extraction with dedup
+│       │   ├── relationships.py     # AI relationship building
+│       │   └── pipeline.py          # DistillPipeline – parallel chunk→summarize→extract→relate
 │       └── compile/
-│           └── __init__.py          # Placeholder – output compilation
+│           ├── __init__.py          # Compilation exports
+│           ├── models.py            # CompileOutput, Flashcard, QAPair, OutputFormat
+│           ├── markdown.py          # Markdown summary renderer
+│           ├── flashcard.py         # AI/template flashcard generator
+│           ├── cheatsheet.py        # Entity-based cheatsheet renderer
+│           ├── qa_generator.py      # AI/template Q&A pair generator
+│           ├── study_guide.py       # AI/template study guide generator
+│           └── pipeline.py          # CompilePipeline – format dispatch + file output
 └── AGENTS.md                        # This file
 ```
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–3B)
+### Current (Phase 0–5)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3).
 - **Ollama** – Local LLM inference via native REST API (Phase 3).
 - **LM Studio** – Local LLM inference via OpenAI-compatible API (Phase 3).
-- **GitHub Copilot** – Cloud LLM inference via OpenAI-compatible API at `api.githubcopilot.com` (Phase 3B).
+- **GitHub Copilot** – Cloud LLM inference via OAuth device flow at `api.githubcopilot.com` (Phase 3B).
 
 ### Future
 | Phase | Integration |
 |---|---|
-| Phase 6+ | Notion API for bi-directional sync |
+| Phase 6+ | Notion MCP (mandatory) for bi-directional page sync |
+| Phase 11 | Polyglot entity/vector store backends (PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |
 
 ## Phase Roadmap
 
 | Phase | Name | Description |
 |---|---|---|
-| 0 | Skeleton | Project structure, CLI, config, logging, error handling |
-| 1 | Ingest | Read files (txt, md, pdf, py) into Document model |
-| 2 | Knowledge Base | SQLite/JSONL storage, CRUD, search |
-| 3 | AI Providers | Ollama, LM Studio, GitHub Copilot integration with preferred provider routing and automatic fallback ✅ |
-| 4 | Distill | Chunking, summarization, entity extraction |
-| 5 | Compile | Render flashcards, notes, study guides |
-| 6 | Notion Sync | Bi-directional Notion integration |
-| 7 | Orchestrator | End-to-end pipeline, incremental processing |
-| 8 | Quality | Tests, linting, CI/CD pipeline |
-| 9 | Polish | Error recovery, progress bars, rich output |
-| 10 | Distribution | Packaging, docs, release automation |
+| 0 | Skeleton | Project structure, CLI, config, logging, error handling ✅ |
+| 1 | Ingest | Read files (txt, md, pdf, py) into Document model ✅ |
+| 2 | Knowledge Base | SQLite/JSONL storage, CRUD, FTS5 search, status ✅ |
+| 3 | AI Providers | Ollama, LM Studio, GitHub Copilot with preferred routing + fallback ✅ |
+| 3C | RAG Pipeline | Retrieve→assemble→generate for Q&A ✅ |
+| 4 | Distill | Chunking, summarization, entity extraction, relationships ✅ |
+| 5 | Compile | Markdown, flashcards, cheatsheets, Q&A, study guides ✅ |
+| 6 | Multi-source | URL/API ingestion, Notion MCP (mandatory) bidirectional page sync |
+| 7 | Orchestrator | End-to-end pipeline, incremental updates |
+| 8 | Plugin system | Extensibility for custom ingesters/compilers |
+| 9 | Polish | Progress bars, rich output, error recovery |
+| 10 | Distribution | Packaging, docs, CI/CD, release automation |
+| 11 | Polyglot Entity Store | Pluggable distilled-entity/vector backends; keep SQLite default for local/dev |
 

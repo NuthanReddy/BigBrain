@@ -163,7 +163,7 @@ These should apply across all phases:
 | 3 | AI provider layer | Copilot Enterprise + Ollama + LM Studio runtime support | 🔴 Critical |
 | 4 | Distillation pipeline | Summary-first distillation, chunks, entities, links | 🔴 Critical |
 | 5 | Summary compilation MVP | Consolidated summaries + Markdown output | 🔴 Critical |
-| 6 | External sync integrations | Notion bidirectional page sync | 🟠 High |
+| 6 | External sync integrations | Notion MCP (mandatory) bidirectional page sync | 🟠 High |
 | 7 | Search and incremental updates | Query + faster reruns | 🟠 High |
 | 8 | Extended ingestion and study outputs | PPT, OCR, web, cheatsheets, flashcards, Q&A | 🟡 Medium |
 | 9 | Audio and rich UX | Podcast scripts/audio, dashboard | 🟢 Future |
@@ -397,10 +397,10 @@ python .\main.py compile md --merge
 
 ---
 
-## Phase 6 - Notion Bidirectional Sync
+## Phase 6 - Notion MCP Bidirectional Sync
 
 ### Goal
-Publish and re-import summary-first outputs through Notion pages after the local summary workflow is solid.
+Publish and re-import summary-first outputs through Notion pages via MCP after the local summary workflow is solid.
 
 ### Detailed task list
 - See `./phase-6-implementation-task-list.md` for the implementation-ready breakdown of Phase 6 work.
@@ -409,6 +409,7 @@ Publish and re-import summary-first outputs through Notion pages after the local
 - publish summaries into target Notion pages
 - preserve source links and metadata
 - allow sync status tracking
+- support target page override, with default output page `Big Brain`
 
 ### 6B. Notion pull / re-ingest
 - fetch previously synced Notion pages and metadata back into the KB
@@ -692,7 +693,7 @@ Confirmed direction:
 - BigBrain must also support **local models through Ollama and LM Studio**.
 - GitHub authentication is **mandatory on first run**.
 - Provider selection should use **automatic fallback**, with support for an optional configured default/override.
-- MVP-adjacent external sync means **Notion bidirectional page sync**.
+- MVP-adjacent external sync means **Notion MCP (mandatory) bidirectional page sync**.
 
 ### Architecture decision
 Treat AI support as a **pluggable provider layer** with:
@@ -726,7 +727,7 @@ All major MVP direction-setting decisions are now resolved:
 - knowledge store = **JSON/JSONL + SQLite early**
 - routing policy = **no forced local-only providers in MVP**
 - first MVP output = **summaries**, then **external sync**
-- external sync scope = **Notion bidirectional page sync**
+- external sync scope = **Notion MCP (mandatory) bidirectional page sync**
 - web crawling = **same-domain-only by default, but configurable**
 
 ---

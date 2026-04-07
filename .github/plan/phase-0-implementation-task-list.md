@@ -1,4 +1,7 @@
 # BigBrain Phase 0 Implementation Task List
+<!-- PLAN:TEMPLATE v1 -->
+<!-- PLAN:SOURCE .github/plan/_phase-task-template.md -->
+
 
 ## Goal
 
@@ -36,7 +39,7 @@ Phase 0 is complete when the repository has:
 
 ---
 
-## Recommended Execution Order
+## Recommended Implementation Order
 
 1. Create the package structure
 2. Move entry orchestration into a CLI module

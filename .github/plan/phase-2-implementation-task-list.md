@@ -1,4 +1,7 @@
 # BigBrain Phase 2 Implementation Task List
+<!-- PLAN:TEMPLATE v1 -->
+<!-- PLAN:SOURCE .github/plan/_phase-task-template.md -->
+
 
 ## Goal
 

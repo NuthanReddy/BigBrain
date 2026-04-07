@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 3B – AI Provider Integration.** Ollama, LM Studio, and GitHub Copilot backends with preferred provider routing and automatic fallback. Phase 2 storage and Phase 1 ingestion remain active.
+**Phase 5 – Knowledge Compilation.** Full pipeline: ingest → store → distill → compile. Renders flashcards, cheatsheets, Q&A, study guides, and markdown summaries from distilled content. AI-powered via GitHub Copilot, Ollama, or LM Studio.
 
 ## Quick Start
 
@@ -269,6 +269,50 @@ distillation:
   max_chunks_per_doc: 50
 ```
 
+## Compilation (Phase 5)
+
+Render distilled content into study materials: markdown summaries, flashcards, cheatsheets, Q&A sets, and study guides.
+
+### Usage
+
+```bash
+# Compile all documents as markdown summaries (default)
+bigbrain compile
+
+# Generate flashcards (AI-powered)
+bigbrain compile --format flashcard
+
+# Generate cheatsheet (template-based, no AI needed)
+bigbrain compile --format cheatsheet
+
+# Generate Q&A study questions (AI-powered)
+bigbrain compile --format qa
+
+# Generate comprehensive study guide (AI-powered)
+bigbrain compile --format study_guide
+
+# Compile a specific document
+bigbrain compile --doc-id <id> --format flashcard -o flashcards.md
+
+# Use a specific model
+bigbrain compile --format study_guide --model claude-opus-4.6
+```
+
+Output files are written to `build/` by default (configurable via `compile.output_dir`).
+
+### Compilation Configuration
+
+```yaml
+# config/example.yaml
+compile:
+  output_dir: build
+  default_format: markdown    # markdown | flashcard | cheatsheet | qa | study_guide
+  flashcard_count: 20
+  qa_count: 15
+  include_relationships: true
+  include_entities: true
+```
+
 ## Configuration
 
 1. Copy `config/example.yaml` and customize for your environment.
@@ -329,7 +373,14 @@ BigBrain/
 │   │   ├── entities.py    # AI entity extraction
 │   │   ├── relationships.py # AI relationship building
 │   │   └── pipeline.py    # DistillPipeline orchestrator
-│   └── compile/           # Output compilation (future)
+│   └── compile/           # Knowledge compilation (Phase 5 ✅)
+│       ├── models.py      # CompileOutput, Flashcard, QAPair, OutputFormat
+│       ├── markdown.py    # Markdown summary renderer
+│       ├── flashcard.py   # AI/template flashcard generator
+│       ├── cheatsheet.py  # Entity-based cheatsheet
+│       ├── qa_generator.py # AI/template Q&A generator
+│       ├── study_guide.py # AI/template study guide
+│       └── pipeline.py    # CompilePipeline orchestrator
 ├── tests/                 # Test suite
 │   ├── ingest/            # Ingestion pipeline tests
 │   └── fixtures/ingest/   # Ingestion test fixtures
@@ -349,20 +400,16 @@ BigBrain/
 ### Running Tests
 
 ```bash
-# Run full test suite (190 tests)
+# Run full test suite (303+ tests)
 python -m pytest tests/ -v
 
-# Run only ingestion tests
-python -m pytest tests/ingest/ -v
-
-# Run KB store tests
-python -m pytest tests/test_kb_store.py -v
-
-# Run provider tests
-python -m pytest tests/test_providers.py -v
-
-# Run a specific test module
-python -m pytest tests/ingest/test_pdf_ingester.py -v
+# Run by module
+python -m pytest tests/ingest/ -v          # Ingestion pipeline
+python -m pytest tests/test_kb_store.py -v # KB store
+python -m pytest tests/test_providers.py -v # AI providers
+python -m pytest tests/test_rag.py -v      # RAG pipeline
+python -m pytest tests/test_distill.py -v  # Distillation
+python -m pytest tests/test_compile.py -v  # Compilation
 ```
 
 ## Phase Roadmap
@@ -373,13 +420,20 @@ python -m pytest tests/ingest/test_pdf_ingester.py -v
 | 1     | File ingestion (local files into raw store)  ✅   |
 | 2     | Knowledge base storage and status reporting  ✅   |
 | 3     | AI provider integration (Ollama, LM Studio, GitHub Copilot)  ✅   |
-| 4     | Content distillation (summaries, entities)   ✅   |
+| 4     | Content distillation (summaries, entities, relationships)   ✅   |
 | 5     | Knowledge compilation into output formats         |
-| 6     | Relationship extraction and knowledge graph       |
+| 6     | Notion MCP (mandatory) bidirectional page sync and knowledge updates  |
 | 7     | Incremental updates and knowledge base search     |
 | 8     | Multi-source ingestion (URLs, APIs)               |
 | 9     | Plugin system and extensibility                   |
 | 10    | Production hardening and performance optimization |
+| 11    | Polyglot entity store (Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |
+
+### Planned Phase 11 Scope
+
+- Add pluggable backends for distilled entities/relationships and vector retrieval.
+- Target backends: PostgreSQL + pgvector, Neo4j, Qdrant, Weaviate, Pinecone.
+- Keep SQLite as the default local/dev backend while adding configurable provider-backed storage for larger deployments.
 
 ## License
 
