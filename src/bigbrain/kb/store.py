@@ -22,7 +22,7 @@ from bigbrain.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS documents (
@@ -113,6 +113,19 @@ CREATE TABLE IF NOT EXISTS relationships (
     generated_by_model TEXT NOT NULL DEFAULT '',
     confidence REAL NOT NULL DEFAULT 1.0,
     metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS notion_sync (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    notion_page_id TEXT NOT NULL,
+    sync_direction TEXT NOT NULL DEFAULT 'bidirectional',
+    last_synced_at TEXT,
+    notion_last_edited TEXT,
+    local_last_edited TEXT,
+    status TEXT NOT NULL DEFAULT 'synced',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(document_id, notion_page_id)
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
@@ -238,6 +251,26 @@ class KBStore:
                 logger.info("Schema migration: added content_hash to chunks table")
             except Exception:
                 pass  # Column already exists (fresh DB created with v3 schema)
+
+        if from_version < 4:
+            try:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS notion_sync (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                        notion_page_id TEXT NOT NULL,
+                        sync_direction TEXT NOT NULL DEFAULT 'bidirectional',
+                        last_synced_at TEXT,
+                        notion_last_edited TEXT,
+                        local_last_edited TEXT,
+                        status TEXT NOT NULL DEFAULT 'synced',
+                        metadata_json TEXT NOT NULL DEFAULT '{}',
+                        UNIQUE(document_id, notion_page_id)
+                    );
+                """)
+                logger.info("Schema migration: added notion_sync table")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -1018,3 +1051,96 @@ class KBStore:
             metadata=json.loads(metadata_json),
             created_at=_iso_to_dt(created_at) or datetime.now(timezone.utc),
         )
+
+    # ------------------------------------------------------------------
+    # Notion Sync
+    # ------------------------------------------------------------------
+
+    def save_sync_mapping(self, document_id: str, notion_page_id: str, **kwargs) -> None:
+        """Save or update a document↔Notion page sync mapping."""
+        now = _utcnow()
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO notion_sync (document_id, notion_page_id, sync_direction, "
+                    "last_synced_at, notion_last_edited, local_last_edited, status, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(document_id, notion_page_id) DO UPDATE SET "
+                    "last_synced_at = excluded.last_synced_at, "
+                    "notion_last_edited = excluded.notion_last_edited, "
+                    "local_last_edited = excluded.local_last_edited, "
+                    "status = excluded.status, "
+                    "metadata_json = excluded.metadata_json",
+                    (
+                        document_id, notion_page_id,
+                        kwargs.get("sync_direction", "bidirectional"),
+                        now,
+                        kwargs.get("notion_last_edited", ""),
+                        kwargs.get("local_last_edited", ""),
+                        kwargs.get("status", "synced"),
+                        json.dumps(kwargs.get("metadata", {}), default=str),
+                    ),
+                )
+
+    def get_sync_mapping(self, document_id: str) -> dict | None:
+        """Get the Notion sync mapping for a document."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT document_id, notion_page_id, sync_direction, last_synced_at, "
+                "notion_last_edited, local_last_edited, status, metadata_json "
+                "FROM notion_sync WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "document_id": row[0], "notion_page_id": row[1],
+            "sync_direction": row[2], "last_synced_at": row[3],
+            "notion_last_edited": row[4], "local_last_edited": row[5],
+            "status": row[6], "metadata": json.loads(row[7]),
+        }
+
+    def get_sync_by_notion_id(self, notion_page_id: str) -> dict | None:
+        """Get sync mapping by Notion page ID."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT document_id, notion_page_id, sync_direction, last_synced_at, "
+                "notion_last_edited, local_last_edited, status, metadata_json "
+                "FROM notion_sync WHERE notion_page_id = ?",
+                (notion_page_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "document_id": row[0], "notion_page_id": row[1],
+            "sync_direction": row[2], "last_synced_at": row[3],
+            "notion_last_edited": row[4], "local_last_edited": row[5],
+            "status": row[6], "metadata": json.loads(row[7]),
+        }
+
+    def list_sync_mappings(self) -> list[dict]:
+        """List all Notion sync mappings."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT document_id, notion_page_id, sync_direction, last_synced_at, "
+                "notion_last_edited, local_last_edited, status, metadata_json "
+                "FROM notion_sync ORDER BY last_synced_at DESC"
+            ).fetchall()
+        return [
+            {
+                "document_id": r[0], "notion_page_id": r[1],
+                "sync_direction": r[2], "last_synced_at": r[3],
+                "notion_last_edited": r[4], "local_last_edited": r[5],
+                "status": r[6], "metadata": json.loads(r[7]),
+            }
+            for r in rows
+        ]
+
+    def delete_sync_mapping(self, document_id: str) -> bool:
+        """Remove a sync mapping."""
+        with self._lock:
+            with self._conn:
+                cur = self._conn.execute(
+                    "DELETE FROM notion_sync WHERE document_id = ?", (document_id,)
+                )
+            return cur.rowcount > 0

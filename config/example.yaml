@@ -75,6 +75,14 @@ compile:
   include_relationships: true
   include_entities: true
 
+# Notion integration (Phase 6)
+notion:
+  enabled: true
+  # token: ""  # Set via BIGBRAIN_NOTION_TOKEN env var (recommended) or here
+  default_page_id: ""  # Parent page ID for new exports
+  sync_direction: bidirectional  # bidirectional | import_only | export_only
+  auto_create_pages: true
+
 # Knowledge Base settings (Phase 2)
 kb:
   backend: sqlite

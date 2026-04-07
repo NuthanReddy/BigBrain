@@ -12,6 +12,13 @@ src/bigbrain.egg-info/entry_points.txt
 src/bigbrain.egg-info/requires.txt
 src/bigbrain.egg-info/top_level.txt
 src/bigbrain/compile/__init__.py
+src/bigbrain/compile/cheatsheet.py
+src/bigbrain/compile/flashcard.py
+src/bigbrain/compile/markdown.py
+src/bigbrain/compile/models.py
+src/bigbrain/compile/pipeline.py
+src/bigbrain/compile/qa_generator.py
+src/bigbrain/compile/study_guide.py
 src/bigbrain/distill/__init__.py
 src/bigbrain/distill/chunker.py
 src/bigbrain/distill/entities.py
@@ -45,6 +52,7 @@ src/bigbrain/rag/context.py
 src/bigbrain/rag/pipeline.py
 src/bigbrain/rag/prompts.py
 src/bigbrain/rag/retriever.py
+tests/test_compile.py
 tests/test_config.py
 tests/test_distill.py
 tests/test_errors.py

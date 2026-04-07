@@ -2,3 +2,4 @@ pyyaml>=6.0
 pymupdf>=1.23
 pypdf>=3.0
 httpx>=0.27
+notion-client>=2.0

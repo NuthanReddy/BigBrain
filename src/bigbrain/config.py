@@ -82,6 +82,16 @@ class CompileConfig:
 
 
 @dataclass
+class NotionConfig:
+    """Configuration for the Notion integration."""
+    enabled: bool = False
+    token: str = ""  # Notion integration token (ntn_*); also reads BIGBRAIN_NOTION_TOKEN env var
+    default_page_id: str = ""  # Default parent page for exports
+    sync_direction: str = "bidirectional"  # bidirectional | import_only | export_only
+    auto_create_pages: bool = True  # Create new Notion pages on export if not mapped
+
+
+@dataclass
 class BigBrainConfig:
     """Central configuration object for the BigBrain application."""
 
@@ -112,6 +122,9 @@ class BigBrainConfig:
 
     # kb
     kb: KBConfig = field(default_factory=KBConfig)
+
+    # notion
+    notion: NotionConfig = field(default_factory=NotionConfig)
 
     @property
     def kb_db_path(self) -> str:
@@ -210,6 +223,19 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
             **comp_kwargs,
         })
 
+    # Special handling for notion → NotionConfig
+    if "notion" in yaml_data and isinstance(yaml_data["notion"], dict):
+        notion_data = yaml_data["notion"]
+        notion_defaults = NotionConfig()
+        notion_kwargs = {}
+        for notion_field in fields(NotionConfig):
+            if notion_field.name in notion_data:
+                notion_kwargs[notion_field.name] = notion_data[notion_field.name]
+        flat["notion"] = NotionConfig(**{
+            **{f.name: getattr(notion_defaults, f.name) for f in fields(NotionConfig)},
+            **notion_kwargs,
+        })
+
     # Special handling for providers → ProviderConfig
     if "providers" in yaml_data and isinstance(yaml_data["providers"], dict):
         prov_data = yaml_data["providers"]
@@ -300,6 +326,7 @@ _KB_ENV_PREFIX = "BIGBRAIN_KB_"
 _PROVIDERS_ENV_PREFIX = "BIGBRAIN_PROVIDERS_"
 _DISTILL_ENV_PREFIX = "BIGBRAIN_DISTILL_"
 _COMPILE_ENV_PREFIX = "BIGBRAIN_COMPILE_"
+_NOTION_ENV_PREFIX = "BIGBRAIN_NOTION_"
 
 # Fields whose env values should be interpreted as booleans.
 _BOOL_FIELDS: set[str] = {f.name for f in fields(BigBrainConfig) if f.type == "bool"}
@@ -337,6 +364,12 @@ _COMPILE_BOOL_FIELDS: set[str] = {
 }
 _COMPILE_INT_FIELDS: set[str] = {
     f.name for f in fields(CompileConfig) if f.type == "int"
+}
+
+# NotionConfig field metadata for type coercion
+_NOTION_VALID_FIELDS: set[str] = {f.name for f in fields(NotionConfig)}
+_NOTION_BOOL_FIELDS: set[str] = {
+    f.name for f in fields(NotionConfig) if f.type == "bool"
 }
 
 
@@ -382,6 +415,7 @@ def load_env_overrides() -> dict[str, Any]:
     providers_overrides: dict[str, Any] = {}
     distill_overrides: dict[str, Any] = {}
     compile_overrides: dict[str, Any] = {}
+    notion_overrides: dict[str, Any] = {}
 
     for key, value in os.environ.items():
         if not key.startswith(_ENV_PREFIX):
@@ -432,6 +466,17 @@ def load_env_overrides() -> dict[str, Any]:
                 distill_overrides[dist_field] = value
             continue
 
+        # Check for BIGBRAIN_NOTION_*
+        if key.startswith(_NOTION_ENV_PREFIX):
+            notion_field = key[len(_NOTION_ENV_PREFIX):].lower()
+            if notion_field not in _NOTION_VALID_FIELDS:
+                continue
+            if notion_field in _NOTION_BOOL_FIELDS:
+                notion_overrides[notion_field] = _coerce_bool(value)
+            else:
+                notion_overrides[notion_field] = value
+            continue
+
         # Check for BIGBRAIN_COMPILE_*
         if key.startswith(_COMPILE_ENV_PREFIX):
             comp_field = key[len(_COMPILE_ENV_PREFIX):].lower()
@@ -464,6 +509,8 @@ def load_env_overrides() -> dict[str, Any]:
         overrides["distillation"] = distill_overrides
     if compile_overrides:
         overrides["compile"] = compile_overrides
+    if notion_overrides:
+        overrides["notion"] = notion_overrides
 
     return overrides
 
@@ -557,6 +604,20 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["compile"] = CompileConfig(**comp_kwargs)
             elif "compile" in yaml_values:
                 merged["compile"] = base_comp
+            # else: dataclass default is used automatically
+        elif f.name == "notion":
+            # Special merge: defaults → YAML → env (field-level)
+            base_notion = yaml_values.get("notion", NotionConfig())
+            env_notion = env_values.get("notion")
+            if env_notion:
+                notion_kwargs = {
+                    fld.name: getattr(base_notion, fld.name)
+                    for fld in fields(NotionConfig)
+                }
+                notion_kwargs.update(env_notion)
+                merged["notion"] = NotionConfig(**notion_kwargs)
+            elif "notion" in yaml_values:
+                merged["notion"] = base_notion
             # else: dataclass default is used automatically
         elif f.name == "providers":
             # Special merge: defaults → YAML → env (field-level)

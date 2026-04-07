@@ -7,3 +7,4 @@ Requires-Dist: pyyaml>=6.0
 Requires-Dist: pymupdf>=1.23
 Requires-Dist: pypdf>=3.0
 Requires-Dist: httpx>=0.27
+Requires-Dist: notion-client>=2.0

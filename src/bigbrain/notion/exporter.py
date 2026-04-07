@@ -1,0 +1,207 @@
+"""Notion page exporter — exports KB content to Notion pages."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from bigbrain.kb.models import Document
+from bigbrain.kb.store import KBStore
+from bigbrain.logging_config import get_logger
+from bigbrain.notion.client import NotionClient
+
+logger = get_logger(__name__)
+
+
+class NotionExporter:
+    """Exports KB documents and distilled content to Notion pages."""
+
+    def __init__(self, client: NotionClient, store: KBStore) -> None:
+        self._client = client
+        self._store = store
+
+    def export_document(
+        self,
+        doc_id: str,
+        *,
+        parent_page_id: str = "",
+        include_summary: bool = True,
+        include_entities: bool = True,
+        include_relationships: bool = True,
+    ) -> str | None:
+        """Export a document to Notion. Returns the Notion page ID or None on failure.
+
+        If a sync mapping exists, updates the existing page.
+        Otherwise, creates a new page under parent_page_id.
+        """
+        doc = self._store.get_document(doc_id)
+        if doc is None:
+            logger.warning("Document not found: %s", doc_id)
+            return None
+
+        blocks = self._build_blocks(
+            doc, include_summary, include_entities, include_relationships,
+        )
+
+        mapping = self._store.get_sync_mapping(doc_id)
+
+        if mapping and mapping.get("notion_page_id"):
+            notion_page_id = mapping["notion_page_id"]
+            try:
+                self._client.update_page_blocks(notion_page_id, blocks)
+                logger.info("Updated Notion page %s for doc %s", notion_page_id, doc.title)
+            except Exception as exc:
+                logger.error("Failed to update Notion page %s: %s", notion_page_id, exc)
+                return None
+        else:
+            if not parent_page_id:
+                logger.error(
+                    "No parent_page_id specified and no existing sync mapping for %s",
+                    doc_id,
+                )
+                return None
+            try:
+                page = self._client.create_page(parent_page_id, doc.title, children=blocks)
+                notion_page_id = page["id"]
+                logger.info("Created Notion page %s for doc %s", notion_page_id, doc.title)
+            except Exception as exc:
+                logger.error("Failed to create Notion page for %s: %s", doc.title, exc)
+                return None
+
+        self._store.save_sync_mapping(
+            document_id=doc_id,
+            notion_page_id=notion_page_id,
+            sync_direction="export",
+            status="synced",
+        )
+
+        return notion_page_id
+
+    def export_all(
+        self,
+        *,
+        parent_page_id: str,
+        source_type: str | None = None,
+        include_summary: bool = True,
+        include_entities: bool = True,
+    ) -> list[str]:
+        """Export all KB documents to Notion. Returns list of Notion page IDs."""
+        docs = self._store.list_documents(source_type=source_type, limit=9999)
+        page_ids: list[str] = []
+        for doc in docs:
+            pid = self.export_document(
+                doc.id,
+                parent_page_id=parent_page_id,
+                include_summary=include_summary,
+                include_entities=include_entities,
+            )
+            if pid:
+                page_ids.append(pid)
+        return page_ids
+
+    def _build_blocks(
+        self,
+        doc: Document,
+        include_summary: bool,
+        include_entities: bool,
+        include_relationships: bool,
+    ) -> list[dict]:
+        """Build Notion block children from a document and its distilled content."""
+        blocks: list[dict] = []
+
+        # Source info
+        if doc.source:
+            blocks.append(
+                _paragraph(f"\U0001f4c4 Source: {doc.source.file_path} ({doc.source.source_type})")
+            )
+            blocks.append(_divider())
+
+        # Summary
+        if include_summary:
+            summaries = self._store.get_summaries(doc.id)
+            if summaries:
+                blocks.append(_heading("Summary", level=2))
+                for s in summaries:
+                    for para in _split_text(s.content, max_len=1900):
+                        blocks.append(_paragraph(para))
+
+        # Entities grouped by type
+        if include_entities:
+            entities = self._store.get_entities(doc.id)
+            if entities:
+                blocks.append(_heading("Key Concepts", level=2))
+                by_type: dict[str, list] = {}
+                for e in entities:
+                    by_type.setdefault(e.entity_type, []).append(e)
+
+                for etype, ents in sorted(by_type.items()):
+                    blocks.append(_heading(etype.replace("_", " ").title(), level=3))
+                    for e in sorted(ents, key=lambda x: x.name)[:30]:
+                        desc = f" — {e.description}" if e.description else ""
+                        blocks.append(_bulleted(f"{e.name}{desc}"))
+
+        # Relationships
+        if include_relationships:
+            relationships = self._store.get_relationships(doc.id)
+            if relationships:
+                entities = self._store.get_entities(doc.id)
+                entity_map = {e.id: e.name for e in entities}
+                blocks.append(_heading("Relationships", level=2))
+                for r in relationships[:30]:
+                    src = entity_map.get(r.source_entity_id, "?")
+                    tgt = entity_map.get(r.target_entity_id, "?")
+                    blocks.append(_bulleted(f"{src} \u2192 {r.relationship_type} \u2192 {tgt}"))
+
+        return blocks
+
+
+# ------------------------------------------------------------------
+# Notion block builders
+# ------------------------------------------------------------------
+
+
+def _paragraph(text: str) -> dict:
+    return {
+        "object": "block",
+        "type": "paragraph",
+        "paragraph": {"rich_text": [{"type": "text", "text": {"content": text}}]},
+    }
+
+
+def _heading(text: str, level: int = 2) -> dict:
+    htype = f"heading_{level}"
+    return {
+        "object": "block",
+        "type": htype,
+        htype: {"rich_text": [{"type": "text", "text": {"content": text}}]},
+    }
+
+
+def _bulleted(text: str) -> dict:
+    return {
+        "object": "block",
+        "type": "bulleted_list_item",
+        "bulleted_list_item": {"rich_text": [{"type": "text", "text": {"content": text}}]},
+    }
+
+
+def _divider() -> dict:
+    return {"object": "block", "type": "divider", "divider": {}}
+
+
+def _split_text(text: str, max_len: int = 1900) -> list[str]:
+    """Split text into chunks that fit Notion's block size limit."""
+    if len(text) <= max_len:
+        return [text]
+    parts: list[str] = []
+    while text:
+        if len(text) <= max_len:
+            parts.append(text)
+            break
+        split = text.rfind("\n", 0, max_len)
+        if split == -1:
+            split = text.rfind(" ", 0, max_len)
+        if split == -1:
+            split = max_len
+        parts.append(text[:split])
+        text = text[split:].lstrip()
+    return parts

@@ -1092,6 +1092,145 @@ def _add_auth_parser(subparsers: argparse._SubParsersAction) -> argparse.Argumen
     return p
 
 
+# ---------------------------------------------------------------------------
+# Notion integration
+# ---------------------------------------------------------------------------
+
+def _handle_notion(args: argparse.Namespace) -> int:
+    """Manage Notion integration."""
+    from bigbrain.config import load_config
+
+    cfg = load_config()
+    action = args.action
+
+    if action == "status":
+        from bigbrain.notion.client import NotionClient
+
+        client = NotionClient.from_config(cfg.notion)
+
+        available = client.is_available()
+        print("Notion Integration Status")
+        print("=" * 40)
+        conn_status = "\u2713 yes" if available else "\u2717 no"
+        print(f"  Connected: {conn_status}")
+        print(f"  Direction: {cfg.notion.sync_direction}")
+
+        if available:
+            from pathlib import Path
+
+            if Path(cfg.kb_db_path).exists():
+                from bigbrain.notion.sync import SyncEngine
+                from bigbrain.kb.store import KBStore
+
+                with KBStore(cfg.kb_db_path) as store:
+                    engine = SyncEngine(client=client, store=store, config=cfg.notion)
+                    mappings = engine.get_sync_status()
+
+                if mappings:
+                    print()
+                    print(f"Synced documents ({len(mappings)}):")
+                    for m in mappings:
+                        print(f"  {m['document_id'][:12]}  {m['title']}  [{m['status']}]")
+                        print(f"    Notion: {m['notion_page_id'][:12]}  Last sync: {m['last_synced_at'] or 'never'}")
+                else:
+                    print()
+                    print("No sync mappings yet. Run 'bigbrain notion sync' or 'bigbrain notion import'.")
+        return 0
+
+    elif action == "sync":
+        from bigbrain.notion.sync import SyncEngine
+
+        parent = args.parent_page_id if hasattr(args, 'parent_page_id') and args.parent_page_id else cfg.notion.default_page_id
+
+        print("Syncing with Notion...")
+        with SyncEngine.from_config(cfg) as engine:
+            result = engine.sync(parent_page_id=parent)
+
+        print()
+        print("Sync complete:")
+        print(f"  Imported:  {result.imported}")
+        print(f"  Exported:  {result.exported}")
+        print(f"  Skipped:   {result.skipped}")
+        if result.conflicts:
+            print(f"  Conflicts: {result.conflicts}")
+        if result.errors:
+            print(f"  Errors:    {len(result.errors)}")
+            for e in result.errors[:5]:
+                print(f"    \u2717 {e}")
+        return 0
+
+    elif action == "import":
+        from bigbrain.notion.sync import SyncEngine
+
+        query = args.query if hasattr(args, 'query') and args.query else ""
+        max_pages = args.limit if hasattr(args, 'limit') else 20
+
+        suffix = f" matching: {query}" if query else ""
+        print(f"Importing Notion pages{suffix}...")
+        with SyncEngine.from_config(cfg) as engine:
+            result = engine.import_pages(query=query, max_pages=max_pages)
+
+        print(f"  Imported: {result.imported}")
+        if result.errors:
+            print(f"  Errors:   {len(result.errors)}")
+        return 0
+
+    elif action == "export":
+        from bigbrain.notion.sync import SyncEngine
+
+        parent = args.parent_page_id if hasattr(args, 'parent_page_id') and args.parent_page_id else cfg.notion.default_page_id
+
+        if not parent:
+            print("Error: --parent-page-id is required for export (or set notion.default_page_id in config).")
+            return 1
+
+        source_type = args.type if hasattr(args, 'type') and args.type else None
+        print("Exporting KB documents to Notion...")
+        with SyncEngine.from_config(cfg) as engine:
+            result = engine.export_documents(parent_page_id=parent, source_type=source_type)
+
+        print(f"  Exported: {result.exported}")
+        if result.errors:
+            print(f"  Errors:   {len(result.errors)}")
+        return 0
+
+    else:
+        print(f"Unknown action: {action}")
+        return 1
+
+
+def _add_notion_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``notion`` subcommand."""
+    p = subparsers.add_parser(
+        "notion",
+        help="Manage Notion integration (sync, import, export)",
+        description="Bidirectional sync between BigBrain KB and Notion workspace.",
+    )
+    p.add_argument(
+        "action",
+        choices=["sync", "import", "export", "status"],
+        help="Notion action: sync (bidirectional), import (pull), export (push), status (check)",
+    )
+    p.add_argument(
+        "--parent-page-id", type=str, default="",
+        help="Notion parent page ID for exports/new pages",
+    )
+    p.add_argument(
+        "--query", "-q", type=str, default="",
+        help="Search query for Notion import (filters pages)",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter KB documents by source type for export",
+    )
+    p.add_argument(
+        "--limit", type=int, default=20,
+        help="Max pages to import (default: 20)",
+    )
+    p.set_defaults(func=_handle_notion)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -1122,6 +1261,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_providers_parser(subparsers)
     _add_ask_parser(subparsers)
     _add_auth_parser(subparsers)
+    _add_notion_parser(subparsers)
 
     return parser
 

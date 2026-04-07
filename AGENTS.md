@@ -38,6 +38,10 @@
 | `bigbrain.providers.lm_studio` | `LMStudioProvider` – LM Studio OpenAI-compatible client (`/v1/completions`, `/v1/chat/completions`) |
 | `bigbrain.providers.github_copilot` | `GitHubCopilotProvider` – GitHub Copilot OpenAI-compatible client (`/chat/completions`, `/models`) |
 | `bigbrain.providers.github_auth` | GitHub token discovery (env vars, CLI config) and authentication helpers |
+| `bigbrain.notion.client` | `NotionClient` – Notion API wrapper (search, get/create pages, block CRUD) |
+| `bigbrain.notion.importer` | `NotionImporter` – converts Notion blocks → KB `Document` with sections |
+| `bigbrain.notion.exporter` | `NotionExporter` – exports KB docs + distilled content → Notion pages |
+| `bigbrain.notion.sync` | `SyncEngine` – bidirectional sync with conflict detection and `SyncResult` tracking |
 
 ### Subpackages
 | Subpackage | Purpose |
@@ -48,6 +52,7 @@
 | `bigbrain.orchestrator` | Manages end-to-end workflows and incremental processing |
 | `bigbrain.distill` | Chunk, normalize, summarize, extract entities, build relationships |
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
+| `bigbrain.notion` | **Active (Phase 6)** – Bidirectional sync between KB and Notion workspace; import, export, and sync engine |
 
 ### Ingestion Pipeline (Phase 1)
 1. `bigbrain.cli` parses `ingest --source <path>` and calls `bigbrain.ingest.service.ingest_path()`.
@@ -75,6 +80,15 @@
 9. `GitHubCopilotProvider` uses the OpenAI-compatible API at `https://api.githubcopilot.com` (`/chat/completions`, `/models`); authentication via OAuth device flow (`bigbrain auth login`).
 10. `github_auth` handles token lifecycle: OAuth device flow login, token caching at `~/.bigbrain/github_token.json`, and validation (rejects classic PATs).
 11. `ProviderResponse` is the common return type: `text`, `model`, `provider`, `usage` (token counts), `metadata`.
+
+### Notion Sync Pipeline (Phase 6)
+1. `bigbrain.cli` parses `notion <subcommand>` and dispatches to the appropriate handler.
+2. `NotionClient.from_config(config.notion)` creates a Notion API wrapper using the configured token (config or `BIGBRAIN_NOTION_TOKEN` env var).
+3. **Import**: `NotionImporter.import_pages()` searches Notion workspace → converts blocks to `Document` sections → stores via `KBStore.save_document()` → records sync mapping.
+4. **Export**: `NotionExporter.export_documents()` reads KB documents → renders content as Notion blocks → creates/updates pages via `NotionClient` → records sync mapping.
+5. **Sync**: `SyncEngine.sync()` compares `notion_last_edited` vs `local_last_edited` timestamps → detects conflicts → imports newer Notion pages and exports newer local docs.
+6. **Status**: `notion status` checks API connectivity via `NotionClient.is_available()` and lists sync mappings from `KBStore.list_sync_mappings()`.
+7. Sync mappings are stored in the `notion_sync` table (KB schema v4) with `document_id ↔ notion_page_id` tracking, direction, timestamps, and status.
 
 ### Error Handling
 - `UserError` for user-facing errors (displayed cleanly, no traceback).
@@ -142,7 +156,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 5)
+## File Structure (Phase 6)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -162,6 +176,7 @@ BigBrain/
 │   ├── test_rag.py                  # RAG pipeline: retriever, context, prompts, pipeline
 │   ├── test_distill.py              # Chunker, summarizer, entities, relationships, pipeline
 │   ├── test_compile.py              # Compilers, pipeline, config
+│   ├── test_notion.py               # Notion client, importer, exporter, sync, KB mappings
 │   ├── ingest/                      # Ingestion pipeline tests
 │   │   ├── test_discovery.py
 │   │   ├── test_registry.py
@@ -235,23 +250,29 @@ BigBrain/
 │           ├── qa_generator.py      # AI/template Q&A pair generator
 │           ├── study_guide.py       # AI/template study guide generator
 │           └── pipeline.py          # CompilePipeline – format dispatch + file output
+│       ├── notion/
+│       │   ├── __init__.py          # Notion integration exports
+│       │   ├── client.py            # NotionClient – API wrapper (search, pages, blocks)
+│       │   ├── importer.py          # NotionImporter – Notion blocks → KB Documents
+│       │   ├── exporter.py          # NotionExporter – KB docs → Notion pages
+│       │   └── sync.py              # SyncEngine – bidirectional sync with conflict detection
 └── AGENTS.md                        # This file
 ```
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–5)
+### Current (Phase 0–6)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3).
 - **Ollama** – Local LLM inference via native REST API (Phase 3).
 - **LM Studio** – Local LLM inference via OpenAI-compatible API (Phase 3).
 - **GitHub Copilot** – Cloud LLM inference via OAuth device flow at `api.githubcopilot.com` (Phase 3B).
+- **notion-client** (`>=2.0`) – Notion SDK for Python; page/block CRUD and search (Phase 6).
 
 ### Future
 | Phase | Integration |
 |---|---|
-| Phase 6+ | Notion MCP (mandatory) for bi-directional page sync |
 | Phase 11 | Polyglot entity/vector store backends (PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |
 
 ## Phase Roadmap
@@ -265,7 +286,7 @@ BigBrain/
 | 3C | RAG Pipeline | Retrieve→assemble→generate for Q&A ✅ |
 | 4 | Distill | Chunking, summarization, entity extraction, relationships ✅ |
 | 5 | Compile | Markdown, flashcards, cheatsheets, Q&A, study guides ✅ |
-| 6 | Multi-source | URL/API ingestion, Notion MCP (mandatory) bidirectional page sync |
+| 6 | Notion Integration | Bidirectional sync between KB and Notion workspace ✅ |
 | 7 | Orchestrator | End-to-end pipeline, incremental updates |
 | 8 | Plugin system | Extensibility for custom ingesters/compilers |
 | 9 | Polish | Progress bars, rich output, error recovery |

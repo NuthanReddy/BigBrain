@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 5 – Knowledge Compilation.** Full pipeline: ingest → store → distill → compile. Renders flashcards, cheatsheets, Q&A, study guides, and markdown summaries from distilled content. AI-powered via GitHub Copilot, Ollama, or LM Studio.
+**Phase 6 – Notion Integration.** Full bidirectional sync between BigBrain KB and Notion workspace. All previous phases remain active.
 
 ## Quick Start
 
@@ -36,6 +36,7 @@ python main.py --help
 | `bigbrain entities`  | List entities with type/search filters                   | 4 ✅   |
 | `bigbrain compact`   | Deduplicate entities, optimize KB                        | 4 ✅   |
 | `bigbrain compile`   | Compile knowledge base into output formats               | 5      |
+| `bigbrain notion`    | Notion sync/import/export/status                         | 6 ✅   |
 | `bigbrain update`    | Run incremental update on changed sources                | 7      |
 
 ## Ingestion (Phase 1)
@@ -313,6 +314,43 @@ compile:
   include_entities: true
 ```
 
+## Notion Integration (Phase 6)
+
+Bidirectional sync between the BigBrain knowledge base and your Notion workspace.
+
+### Setup
+
+1. Create a Notion integration at https://www.notion.so/my-integrations
+2. Set your token: `$env:BIGBRAIN_NOTION_TOKEN = "ntn_your_token"`
+3. Share target Notion pages with your integration
+
+### Usage
+
+```bash
+# Check Notion connectivity and sync status
+bigbrain notion status
+
+# Import pages from Notion into KB
+bigbrain notion import
+bigbrain notion import --query "algorithms" --limit 10
+
+# Export KB documents to Notion
+bigbrain notion export --parent-page-id <page-id>
+
+# Full bidirectional sync
+bigbrain notion sync --parent-page-id <page-id>
+```
+
+### Configuration
+
+```yaml
+# config/example.yaml
+notion:
+  enabled: true
+  sync_direction: bidirectional  # bidirectional | import_only | export_only
+  auto_create_pages: true
+```
+
 ## Configuration
 
 1. Copy `config/example.yaml` and customize for your environment.
@@ -381,6 +419,11 @@ BigBrain/
 │       ├── qa_generator.py # AI/template Q&A generator
 │       ├── study_guide.py # AI/template study guide
 │       └── pipeline.py    # CompilePipeline orchestrator
+│   ├── notion/            # Notion integration (Phase 6 ✅)
+│   │   ├── client.py      # Notion API client wrapper
+│   │   ├── importer.py    # Import Notion pages to KB
+│   │   ├── exporter.py    # Export KB content to Notion
+│   │   └── sync.py        # Bidirectional sync engine
 ├── tests/                 # Test suite
 │   ├── ingest/            # Ingestion pipeline tests
 │   └── fixtures/ingest/   # Ingestion test fixtures
@@ -400,7 +443,7 @@ BigBrain/
 ### Running Tests
 
 ```bash
-# Run full test suite (303+ tests)
+# Run full test suite (341+ tests)
 python -m pytest tests/ -v
 
 # Run by module
@@ -410,6 +453,7 @@ python -m pytest tests/test_providers.py -v # AI providers
 python -m pytest tests/test_rag.py -v      # RAG pipeline
 python -m pytest tests/test_distill.py -v  # Distillation
 python -m pytest tests/test_compile.py -v  # Compilation
+python -m pytest tests/test_notion.py -v   # Notion integration
 ```
 
 ## Phase Roadmap
@@ -421,8 +465,8 @@ python -m pytest tests/test_compile.py -v  # Compilation
 | 2     | Knowledge base storage and status reporting  ✅   |
 | 3     | AI provider integration (Ollama, LM Studio, GitHub Copilot)  ✅   |
 | 4     | Content distillation (summaries, entities, relationships)   ✅   |
-| 5     | Knowledge compilation into output formats         |
-| 6     | Notion MCP (mandatory) bidirectional page sync and knowledge updates  |
+| 5     | Knowledge compilation into output formats    ✅   |
+| 6     | Notion bidirectional page sync and knowledge updates  ✅  |
 | 7     | Incremental updates and knowledge base search     |
 | 8     | Multi-source ingestion (URLs, APIs)               |
 | 9     | Plugin system and extensibility                   |
