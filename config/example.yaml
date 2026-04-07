@@ -35,7 +35,8 @@ providers:
     timeout: 120
   github_copilot:
     enabled: true
-    # api_token: ""  # Or set GITHUB_TOKEN env var
+    # Authentication: run 'bigbrain auth login' (OAuth device flow).
+    # Token is cached at ~/.bigbrain/github_token.json — no env var needed.
     base_url: "https://api.githubcopilot.com"
     default_model: "claude-opus-4.6"
     timeout: 60

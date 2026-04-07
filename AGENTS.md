@@ -72,8 +72,8 @@
 6. `registry.health_check()` returns a dict of `provider_name → bool` for all registered providers.
 7. `OllamaProvider` uses Ollama's native REST API (`/api/generate`, `/api/chat`, `/api/tags`).
 8. `LMStudioProvider` uses the OpenAI-compatible API (`/v1/completions`, `/v1/chat/completions`, `/v1/models`).
-9. `GitHubCopilotProvider` uses the OpenAI-compatible API at `https://api.githubcopilot.com` (`/chat/completions`, `/models`); authentication via `GITHUB_TOKEN` env var or GitHub CLI config.
-10. `github_auth` handles token discovery: checks `GITHUB_TOKEN` env var, then falls back to GitHub CLI stored credentials.
+9. `GitHubCopilotProvider` uses the OpenAI-compatible API at `https://api.githubcopilot.com` (`/chat/completions`, `/models`); authentication via OAuth device flow (`bigbrain auth login`).
+10. `github_auth` handles token lifecycle: OAuth device flow login, token caching at `~/.bigbrain/github_token.json`, and validation (rejects classic PATs).
 11. `ProviderResponse` is the common return type: `text`, `model`, `provider`, `usage` (token counts), `metadata`.
 
 ### Error Handling

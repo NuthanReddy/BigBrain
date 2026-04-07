@@ -28,7 +28,9 @@ python main.py --help
 | `bigbrain kb-search` | Search the knowledge base (full-text)                    | 2 ✅   |
 | `bigbrain kb-export` | Export knowledge base to JSONL file                      | 2 ✅   |
 | `bigbrain kb-import` | Import documents from a JSONL file                       | 2 ✅   |
-| `bigbrain providers` | Show AI provider status and availability                  | 3 ✅   |
+| `bigbrain providers` | Show AI provider status and availability                 | 3 ✅   |
+| `bigbrain auth`      | Manage GitHub Copilot authentication (login/logout)      | 3 ✅   |
+| `bigbrain ask`       | Ask a question using KB context + AI (RAG)               | 3 ✅   |
 | `bigbrain distill`   | Distill content into summaries, entities, relationships  | 4      |
 | `bigbrain compile`   | Compile knowledge base into output formats               | 5      |
 | `bigbrain update`    | Run incremental update on changed sources                | 7      |
@@ -165,8 +167,8 @@ providers:
     timeout: 120
   github_copilot:
     enabled: true
-    # api_token: ""  # Or set GITHUB_TOKEN env var
-    default_model: "gpt-4o"
+    # Auth: run 'bigbrain auth login' (no env var needed)
+    default_model: "claude-opus-4.6"
     timeout: 60
     max_retries: 3
 ```
@@ -194,11 +196,20 @@ response = registry.chat([
 ### Provider Status CLI
 
 ```bash
+# Authenticate with GitHub Copilot (one-time device flow)
+python main.py auth login
+
+# Check auth status
+python main.py auth status
+
 # Check provider status
 python main.py providers
 
 # Show available models
 python main.py providers --models
+
+# Logout (clear cached token)
+python main.py auth logout
 ```
 
 ## Configuration
@@ -222,7 +233,7 @@ Top-level settings use the `BIGBRAIN_` prefix. Nested ingestion settings use `BI
 | `BIGBRAIN_INGESTION_ENCODING` | string | `latin-1` |
 | `BIGBRAIN_KB_BACKEND` | string | `sqlite` |
 | `BIGBRAIN_KB_DB_PATH` | string | `/custom/path.db` |
-| `GITHUB_TOKEN` | string | GitHub Copilot API token |
+| `BIGBRAIN_PROVIDERS_PREFERRED` | string | `ollama` |
 
 ## Project Structure
 

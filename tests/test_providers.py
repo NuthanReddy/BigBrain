@@ -645,17 +645,18 @@ class TestGitHubAuth:
     @patch.dict("os.environ", {"GITHUB_TOKEN": "ghp_classic_pat_12345"})
     def test_resolve_token_skips_classic_pat_env(self):
         """Skips ghp_* classic PATs from GITHUB_TOKEN env var."""
-        token = resolve_github_token(config_token="")
-        assert token == ""
+        with patch("bigbrain.providers.github_auth._load_cached_token", return_value=""):
+            token = resolve_github_token(config_token="")
+            assert token == ""
 
     @patch.dict("os.environ", {}, clear=True)
     def test_resolve_token_empty(self):
         """Returns empty string when nothing is set."""
-        # Remove GITHUB_TOKEN if present
         import os
         os.environ.pop("GITHUB_TOKEN", None)
-        token = resolve_github_token(config_token="")
-        assert token == ""
+        with patch("bigbrain.providers.github_auth._load_cached_token", return_value=""):
+            token = resolve_github_token(config_token="")
+            assert token == ""
 
     def test_validate_token_valid(self):
         """Accepts OAuth tokens >= 10 chars (gho_, ghu_, etc.)."""
@@ -780,7 +781,8 @@ class TestGitHubCopilotProvider:
 
     def test_chat_no_token_raises(self):
         """Raises ProviderError about missing token."""
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True), \
+             patch("bigbrain.providers.github_auth._load_cached_token", return_value=""):
             import os
             os.environ.pop("GITHUB_TOKEN", None)
             p = self._make_provider(api_token="")
