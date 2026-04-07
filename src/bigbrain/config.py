@@ -17,7 +17,12 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-from bigbrain.providers.config import LMStudioConfig, OllamaConfig, ProviderConfig
+from bigbrain.providers.config import (
+    GitHubCopilotConfig,
+    LMStudioConfig,
+    OllamaConfig,
+    ProviderConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +187,23 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
         else:
             lms_cfg = LMStudioConfig()
 
-        flat["providers"] = ProviderConfig(ollama=ollama_cfg, lm_studio=lms_cfg)
+        ghc_kwargs = {}
+        if "github_copilot" in prov_data and isinstance(prov_data["github_copilot"], dict):
+            ghc_defaults = GitHubCopilotConfig()
+            for f in fields(GitHubCopilotConfig):
+                if f.name in prov_data["github_copilot"]:
+                    ghc_kwargs[f.name] = prov_data["github_copilot"][f.name]
+            ghc_cfg = GitHubCopilotConfig(**{
+                **{f.name: getattr(ghc_defaults, f.name) for f in fields(GitHubCopilotConfig)},
+                **ghc_kwargs,
+            })
+        else:
+            ghc_cfg = GitHubCopilotConfig()
+
+        flat["providers"] = ProviderConfig(
+            preferred_provider=prov_data.get("preferred_provider", ""),
+            ollama=ollama_cfg, lm_studio=lms_cfg, github_copilot=ghc_cfg,
+        )
 
     return flat
 
@@ -224,6 +245,7 @@ def load_yaml_config(path: str) -> dict[str, Any]:
 _ENV_PREFIX = "BIGBRAIN_"
 _INGESTION_ENV_PREFIX = "BIGBRAIN_INGESTION_"
 _KB_ENV_PREFIX = "BIGBRAIN_KB_"
+_PROVIDERS_ENV_PREFIX = "BIGBRAIN_PROVIDERS_"
 
 # Fields whose env values should be interpreted as booleans.
 _BOOL_FIELDS: set[str] = {f.name for f in fields(BigBrainConfig) if f.type == "bool"}
@@ -285,9 +307,17 @@ def load_env_overrides() -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     ingestion_overrides: dict[str, Any] = {}
     kb_overrides: dict[str, Any] = {}
+    providers_overrides: dict[str, Any] = {}
 
     for key, value in os.environ.items():
         if not key.startswith(_ENV_PREFIX):
+            continue
+
+        # Check for BIGBRAIN_PROVIDERS_* (e.g. BIGBRAIN_PROVIDERS_PREFERRED)
+        if key.startswith(_PROVIDERS_ENV_PREFIX):
+            prov_field = key[len(_PROVIDERS_ENV_PREFIX):].lower()
+            if prov_field == "preferred":
+                providers_overrides["preferred_provider"] = value
             continue
 
         # Check for BIGBRAIN_INGESTION_* first (longer prefix)
@@ -328,6 +358,8 @@ def load_env_overrides() -> dict[str, Any]:
         overrides["ingestion"] = ingestion_overrides
     if kb_overrides:
         overrides["kb"] = kb_overrides
+    if providers_overrides:
+        overrides["providers"] = providers_overrides
 
     return overrides
 
@@ -395,9 +427,18 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["kb"] = base_kb
             # else: dataclass default is used automatically
         elif f.name == "providers":
-            # Providers come from YAML only (no env var support yet)
-            if "providers" in yaml_values:
-                merged["providers"] = yaml_values["providers"]
+            # Special merge: defaults → YAML → env (field-level)
+            base_prov = yaml_values.get("providers", ProviderConfig())
+            env_prov = env_values.get("providers")
+            if env_prov:
+                prov_kwargs = {
+                    fld.name: getattr(base_prov, fld.name)
+                    for fld in fields(ProviderConfig)
+                }
+                prov_kwargs.update(env_prov)
+                merged["providers"] = ProviderConfig(**prov_kwargs)
+            elif "providers" in yaml_values:
+                merged["providers"] = base_prov
             # else: dataclass default is used automatically
         elif f.name in env_values:
             merged[f.name] = env_values[f.name]

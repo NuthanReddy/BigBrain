@@ -22,6 +22,7 @@ paths:
 # AI Provider configuration
 # Providers are tried in order of preference with automatic fallback.
 providers:
+  preferred_provider: ""  # Set to "ollama", "lm_studio", or "github_copilot" to override fallback order
   ollama:
     enabled: false
     base_url: "http://localhost:11434"
@@ -32,6 +33,13 @@ providers:
     base_url: "http://localhost:1234"
     default_model: ""
     timeout: 120
+  github_copilot:
+    enabled: false
+    # api_token: ""  # Or set GITHUB_TOKEN env var
+    base_url: "https://api.githubcopilot.com"
+    default_model: "gpt-4o"
+    timeout: 60
+    max_retries: 3
 
 # Ingestion settings (Phase 1)
 ingestion:

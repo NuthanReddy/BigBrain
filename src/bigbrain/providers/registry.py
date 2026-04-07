@@ -31,13 +31,14 @@ class ProviderRegistry:
             response = registry.complete("...")
     """
 
-    def __init__(self) -> None:
+    def __init__(self, preferred: str = "") -> None:
         self._providers: list[BaseProvider] = []
+        self._preferred = preferred
 
     @classmethod
     def from_config(cls, config: ProviderConfig) -> ProviderRegistry:
         """Create registry from ProviderConfig, loading only enabled providers."""
-        registry = cls()
+        registry = cls(preferred=config.preferred_provider)
 
         # Register Ollama if enabled
         if config.ollama.enabled:
@@ -52,6 +53,13 @@ class ProviderRegistry:
 
             registry.register(LMStudioProvider(config.lm_studio))
             logger.debug("Registered LM Studio provider")
+
+        # Register GitHub Copilot if enabled
+        if config.github_copilot.enabled:
+            from bigbrain.providers.github_copilot import GitHubCopilotProvider
+
+            registry.register(GitHubCopilotProvider(config.github_copilot))
+            logger.debug("Registered GitHub Copilot provider")
 
         return registry
 
@@ -93,11 +101,31 @@ class ProviderRegistry:
     def get_provider(self) -> BaseProvider:
         """Return the first available provider.
 
+        If a preferred provider is configured, it is tried first.
         Raises NoProviderAvailableError if none are available.
         """
         if not self._providers:
             raise NoProviderAvailableError(tried=[])
 
+        # Try preferred provider first
+        if self._preferred:
+            for p in self._providers:
+                if p.name == self._preferred:
+                    try:
+                        if p.is_available():
+                            return p
+                        logger.warning(
+                            "Preferred provider '%s' is not available, falling back",
+                            self._preferred,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Preferred provider '%s' check failed, falling back",
+                            self._preferred,
+                        )
+                    break
+
+        # Fallback to registration order
         for p in self._providers:
             try:
                 if p.is_available():
@@ -156,9 +184,15 @@ class ProviderRegistry:
         """Extract entities with fallback across providers."""
         return self._with_fallback("extract_entities", text=text, model=model)
 
+    @property
+    def preferred(self) -> str:
+        """Return the preferred provider name, or empty string."""
+        return self._preferred
+
     def _with_fallback(self, method_name: str, **kwargs: Any) -> ProviderResponse:
         """Try calling method_name on each provider in order.
 
+        If a preferred provider is configured, it is tried first.
         On ProviderError, log warning and try next provider.
         On success, return the response.
         If all fail, raise NoProviderAvailableError.
@@ -166,12 +200,18 @@ class ProviderRegistry:
         if not self._providers:
             raise NoProviderAvailableError(tried=[])
 
+        # Build ordered provider list: preferred first, then rest
+        ordered = list(self._providers)
+        if self._preferred:
+            preferred = [p for p in ordered if p.name == self._preferred]
+            others = [p for p in ordered if p.name != self._preferred]
+            ordered = preferred + others
+
         errors: list[str] = []
-        for provider in self._providers:
+        for provider in ordered:
             try:
                 method = getattr(provider, method_name)
-                response = method(**kwargs)
-                return response
+                return method(**kwargs)
             except ProviderError as exc:
                 logger.warning("Provider %s failed: %s", provider.name, exc)
                 errors.append(f"{provider.name}: {exc}")

@@ -26,8 +26,23 @@ class LMStudioConfig:
 
 
 @dataclass
+class GitHubCopilotConfig:
+    """Configuration for the GitHub Copilot provider."""
+
+    enabled: bool = False
+    api_token: str = ""  # GitHub personal access token; also reads GITHUB_TOKEN env var
+    base_url: str = "https://api.githubcopilot.com"
+    default_model: str = "gpt-4o"
+    timeout: int = 60
+    max_retries: int = 3
+    retry_delay: float = 1.0  # seconds between retries
+
+
+@dataclass
 class ProviderConfig:
     """Top-level provider configuration."""
 
+    preferred_provider: str = ""  # e.g. "ollama", "lm_studio"; empty = use registration order
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     lm_studio: LMStudioConfig = field(default_factory=LMStudioConfig)
+    github_copilot: GitHubCopilotConfig = field(default_factory=GitHubCopilotConfig)
