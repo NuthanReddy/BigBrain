@@ -34,10 +34,10 @@ providers:
     default_model: ""
     timeout: 120
   github_copilot:
-    enabled: false
+    enabled: true
     # api_token: ""  # Or set GITHUB_TOKEN env var
     base_url: "https://api.githubcopilot.com"
-    default_model: "gpt-4o"
+    default_model: "claude-opus-4.6"
     timeout: 60
     max_retries: 3
 

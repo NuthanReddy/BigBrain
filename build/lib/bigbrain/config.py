@@ -17,6 +17,13 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from bigbrain.providers.config import (
+    GitHubCopilotConfig,
+    LMStudioConfig,
+    OllamaConfig,
+    ProviderConfig,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -44,6 +51,14 @@ class IngestionConfig:
 
 
 @dataclass
+class KBConfig:
+    """Configuration for the knowledge base storage layer."""
+
+    backend: str = "sqlite"  # sqlite (only option for now)
+    db_path: str = ""  # empty = derive from BigBrainConfig.kb_dir
+
+
+@dataclass
 class BigBrainConfig:
     """Central configuration object for the BigBrain application."""
 
@@ -60,12 +75,8 @@ class BigBrainConfig:
     data_dir: str = "data"
     kb_dir: str = "data/kb"
 
-    # providers (reserved for Phase 3+)
-    providers: dict = field(default_factory=lambda: {
-        "github_copilot": {"enabled": False, "api_key": ""},
-        "ollama": {"enabled": False, "base_url": "http://localhost:11434"},
-        "lm_studio": {"enabled": False, "base_url": "http://localhost:1234"},
-    })
+    # providers
+    providers: ProviderConfig = field(default_factory=ProviderConfig)
 
     # ingestion
     ingestion: IngestionConfig = field(default_factory=IngestionConfig)
@@ -73,8 +84,15 @@ class BigBrainConfig:
     # distillation (reserved)
     distillation: dict = field(default_factory=dict)
 
-    # kb (reserved)
-    kb: dict = field(default_factory=dict)
+    # kb
+    kb: KBConfig = field(default_factory=KBConfig)
+
+    @property
+    def kb_db_path(self) -> str:
+        """Resolved database path: explicit kb.db_path or derived from kb_dir."""
+        if self.kb.db_path:
+            return self.kb.db_path
+        return str(Path(self.kb_dir) / "bigbrain.db")
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +113,7 @@ _YAML_FIELD_MAP: dict[str, str] = {
 }
 
 # Sections that map 1-to-1 to dict fields on the dataclass.
-_YAML_DICT_SECTIONS = ("providers", "distillation", "kb")
+_YAML_DICT_SECTIONS = ("distillation",)
 
 
 def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
@@ -126,6 +144,66 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
             **{f.name: getattr(ing_defaults, f.name) for f in fields(IngestionConfig)},
             **ing_kwargs,
         })
+
+    # Special handling for kb → KBConfig
+    if "kb" in yaml_data and isinstance(yaml_data["kb"], dict):
+        kb_data = yaml_data["kb"]
+        kb_defaults = KBConfig()
+        kb_kwargs = {}
+        for kb_field in fields(KBConfig):
+            if kb_field.name in kb_data:
+                kb_kwargs[kb_field.name] = kb_data[kb_field.name]
+        flat["kb"] = KBConfig(**{
+            **{f.name: getattr(kb_defaults, f.name) for f in fields(KBConfig)},
+            **kb_kwargs,
+        })
+
+    # Special handling for providers → ProviderConfig
+    if "providers" in yaml_data and isinstance(yaml_data["providers"], dict):
+        prov_data = yaml_data["providers"]
+        ollama_kwargs = {}
+        if "ollama" in prov_data and isinstance(prov_data["ollama"], dict):
+            ollama_defaults = OllamaConfig()
+            for f in fields(OllamaConfig):
+                if f.name in prov_data["ollama"]:
+                    ollama_kwargs[f.name] = prov_data["ollama"][f.name]
+            ollama_cfg = OllamaConfig(**{
+                **{f.name: getattr(ollama_defaults, f.name) for f in fields(OllamaConfig)},
+                **ollama_kwargs,
+            })
+        else:
+            ollama_cfg = OllamaConfig()
+
+        lms_kwargs = {}
+        if "lm_studio" in prov_data and isinstance(prov_data["lm_studio"], dict):
+            lms_defaults = LMStudioConfig()
+            for f in fields(LMStudioConfig):
+                if f.name in prov_data["lm_studio"]:
+                    lms_kwargs[f.name] = prov_data["lm_studio"][f.name]
+            lms_cfg = LMStudioConfig(**{
+                **{f.name: getattr(lms_defaults, f.name) for f in fields(LMStudioConfig)},
+                **lms_kwargs,
+            })
+        else:
+            lms_cfg = LMStudioConfig()
+
+        ghc_kwargs = {}
+        if "github_copilot" in prov_data and isinstance(prov_data["github_copilot"], dict):
+            ghc_defaults = GitHubCopilotConfig()
+            for f in fields(GitHubCopilotConfig):
+                if f.name in prov_data["github_copilot"]:
+                    ghc_kwargs[f.name] = prov_data["github_copilot"][f.name]
+            ghc_cfg = GitHubCopilotConfig(**{
+                **{f.name: getattr(ghc_defaults, f.name) for f in fields(GitHubCopilotConfig)},
+                **ghc_kwargs,
+            })
+        else:
+            ghc_cfg = GitHubCopilotConfig()
+
+        flat["providers"] = ProviderConfig(
+            preferred_provider=prov_data.get("preferred_provider", ""),
+            ollama=ollama_cfg, lm_studio=lms_cfg, github_copilot=ghc_cfg,
+        )
 
     return flat
 
@@ -166,6 +244,8 @@ def load_yaml_config(path: str) -> dict[str, Any]:
 
 _ENV_PREFIX = "BIGBRAIN_"
 _INGESTION_ENV_PREFIX = "BIGBRAIN_INGESTION_"
+_KB_ENV_PREFIX = "BIGBRAIN_KB_"
+_PROVIDERS_ENV_PREFIX = "BIGBRAIN_PROVIDERS_"
 
 # Fields whose env values should be interpreted as booleans.
 _BOOL_FIELDS: set[str] = {f.name for f in fields(BigBrainConfig) if f.type == "bool"}
@@ -183,6 +263,9 @@ _INGESTION_INT_FIELDS: set[str] = {
 _INGESTION_LIST_FIELDS: set[str] = {
     f.name for f in fields(IngestionConfig) if f.type == "list[str]"
 }
+
+# KBConfig field metadata
+_KB_VALID_FIELDS: set[str] = {f.name for f in fields(KBConfig)}
 
 
 def _coerce_bool(value: str) -> bool:
@@ -206,21 +289,35 @@ def load_env_overrides() -> dict[str, Any]:
         BIGBRAIN_INGESTION_SUPPORTED_EXTENSIONS=.txt,.md
             → ingestion.supported_extensions = [".txt", ".md"]
 
+    **Nested KB fields** – ``BIGBRAIN_KB_*`` variables are mapped to
+    :class:`KBConfig` fields.  Examples::
+
+        BIGBRAIN_KB_BACKEND=sqlite    → kb.backend = "sqlite"
+        BIGBRAIN_KB_DB_PATH=/tmp/bb.db → kb.db_path = "/tmp/bb.db"
+
     Type coercion is applied automatically: booleans, integers,
     comma-separated lists, and plain strings.
 
     Returns
     -------
     dict[str, Any]
-        Overrides dict.  May contain an ``"ingestion"`` key holding a
-        partially-built :class:`IngestionConfig` when any
-        ``BIGBRAIN_INGESTION_*`` variables are present.
+        Overrides dict.  May contain ``"ingestion"`` and/or ``"kb"``
+        keys when any nested variables are present.
     """
     overrides: dict[str, Any] = {}
     ingestion_overrides: dict[str, Any] = {}
+    kb_overrides: dict[str, Any] = {}
+    providers_overrides: dict[str, Any] = {}
 
     for key, value in os.environ.items():
         if not key.startswith(_ENV_PREFIX):
+            continue
+
+        # Check for BIGBRAIN_PROVIDERS_* (e.g. BIGBRAIN_PROVIDERS_PREFERRED)
+        if key.startswith(_PROVIDERS_ENV_PREFIX):
+            prov_field = key[len(_PROVIDERS_ENV_PREFIX):].lower()
+            if prov_field == "preferred":
+                providers_overrides["preferred_provider"] = value
             continue
 
         # Check for BIGBRAIN_INGESTION_* first (longer prefix)
@@ -240,6 +337,14 @@ def load_env_overrides() -> dict[str, Any]:
                 ingestion_overrides[ing_field] = value
             continue
 
+        # Check for BIGBRAIN_KB_*
+        if key.startswith(_KB_ENV_PREFIX):
+            kb_field = key[len(_KB_ENV_PREFIX):].lower()
+            if kb_field not in _KB_VALID_FIELDS:
+                continue
+            kb_overrides[kb_field] = value
+            continue
+
         # Top-level BIGBRAIN_* fields
         field_name = key[len(_ENV_PREFIX):].lower()
         if field_name not in _VALID_FIELD_NAMES:
@@ -251,6 +356,10 @@ def load_env_overrides() -> dict[str, Any]:
 
     if ingestion_overrides:
         overrides["ingestion"] = ingestion_overrides
+    if kb_overrides:
+        overrides["kb"] = kb_overrides
+    if providers_overrides:
+        overrides["providers"] = providers_overrides
 
     return overrides
 
@@ -302,6 +411,34 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["ingestion"] = IngestionConfig(**ing_kwargs)
             elif "ingestion" in yaml_values:
                 merged["ingestion"] = base_ing
+            # else: dataclass default is used automatically
+        elif f.name == "kb":
+            # Special merge: defaults → YAML → env (field-level)
+            base_kb = yaml_values.get("kb", KBConfig())
+            env_kb = env_values.get("kb")
+            if env_kb:
+                kb_kwargs = {
+                    fld.name: getattr(base_kb, fld.name)
+                    for fld in fields(KBConfig)
+                }
+                kb_kwargs.update(env_kb)
+                merged["kb"] = KBConfig(**kb_kwargs)
+            elif "kb" in yaml_values:
+                merged["kb"] = base_kb
+            # else: dataclass default is used automatically
+        elif f.name == "providers":
+            # Special merge: defaults → YAML → env (field-level)
+            base_prov = yaml_values.get("providers", ProviderConfig())
+            env_prov = env_values.get("providers")
+            if env_prov:
+                prov_kwargs = {
+                    fld.name: getattr(base_prov, fld.name)
+                    for fld in fields(ProviderConfig)
+                }
+                prov_kwargs.update(env_prov)
+                merged["providers"] = ProviderConfig(**prov_kwargs)
+            elif "providers" in yaml_values:
+                merged["providers"] = base_prov
             # else: dataclass default is used automatically
         elif f.name in env_values:
             merged[f.name] = env_values[f.name]
