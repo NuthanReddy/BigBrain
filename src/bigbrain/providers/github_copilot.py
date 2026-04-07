@@ -92,8 +92,7 @@ class GitHubCopilotProvider(BaseProvider):
         if not validate_token(self._token):
             raise ProviderError(
                 "github_copilot",
-                "No valid API token configured. "
-                "Set GITHUB_TOKEN env var or providers.github_copilot.api_token in config.",
+                "No valid Copilot token. Run 'bigbrain auth login' to authenticate via GitHub.",
             )
 
         model = model or self._config.default_model
@@ -117,6 +116,17 @@ class GitHubCopilotProvider(BaseProvider):
                     headers=self._headers(),
                     timeout=self._timeout,
                 )
+
+                # Permanent auth errors — do not retry
+                if resp.status_code == 400:
+                    body = resp.text[:200]
+                    if "Personal Access Token" in body or "not supported" in body:
+                        raise ProviderError(
+                            "github_copilot",
+                            "Classic PATs are not supported. "
+                            "Run 'bigbrain auth login' to authenticate via GitHub device flow.",
+                        )
+                    raise ProviderError("github_copilot", f"Bad request: {body}")
 
                 # Rate limit handling
                 if resp.status_code == 429:

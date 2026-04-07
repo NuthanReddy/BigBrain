@@ -577,6 +577,67 @@ def _add_ask_parser(subparsers: argparse._SubParsersAction) -> argparse.Argument
     return p
 
 
+def _handle_auth(args: argparse.Namespace) -> int:
+    """Manage GitHub authentication."""
+    from bigbrain.providers.github_auth import (
+        device_flow_login,
+        clear_cached_token,
+        resolve_github_token,
+        validate_token,
+        AuthError,
+        _TOKEN_CACHE_PATH,
+    )
+
+    action = args.action
+
+    if action == "login":
+        try:
+            token = device_flow_login()
+            print(f"Authenticated successfully. Token cached at {_TOKEN_CACHE_PATH}")
+            return 0
+        except AuthError as exc:
+            print(f"Authentication failed: {exc}", file=sys.stderr)
+            return 1
+
+    elif action == "logout":
+        if clear_cached_token():
+            print("GitHub token removed.")
+        else:
+            print("No cached token found.")
+        return 0
+
+    elif action == "status":
+        token = resolve_github_token()
+        if validate_token(token):
+            # Mask the token for display
+            masked = token[:8] + "..." + token[-4:] if len(token) > 16 else "***"
+            print(f"GitHub token: {masked}")
+            if _TOKEN_CACHE_PATH.exists():
+                print(f"  Cached at: {_TOKEN_CACHE_PATH}")
+        else:
+            print("No valid GitHub token found.")
+            print("  Run 'bigbrain auth login' to authenticate.")
+        return 0
+
+    return 0
+
+
+def _add_auth_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``auth`` subcommand."""
+    p = subparsers.add_parser(
+        "auth",
+        help="Manage GitHub authentication for Copilot",
+        description="Login, logout, or check GitHub Copilot authentication status.",
+    )
+    p.add_argument(
+        "action",
+        choices=["login", "logout", "status"],
+        help="Authentication action: login (device flow), logout (clear token), status (check token)",
+    )
+    p.set_defaults(func=_handle_auth)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -603,6 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_kb_import_parser(subparsers)
     _add_providers_parser(subparsers)
     _add_ask_parser(subparsers)
+    _add_auth_parser(subparsers)
 
     return parser
 

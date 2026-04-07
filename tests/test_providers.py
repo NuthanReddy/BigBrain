@@ -633,14 +633,20 @@ class TestProviderRegistry:
 class TestGitHubAuth:
     def test_resolve_token_from_config(self):
         """Config value takes priority over environment."""
-        token = resolve_github_token(config_token="ghp_config_token_12345")
-        assert token == "ghp_config_token_12345"
+        token = resolve_github_token(config_token="gho_config_token_12345")
+        assert token == "gho_config_token_12345"
 
-    @patch.dict("os.environ", {"GITHUB_TOKEN": "ghp_env_token_67890"})
+    @patch.dict("os.environ", {"GITHUB_TOKEN": "gho_env_token_67890"})
     def test_resolve_token_from_env(self):
-        """Falls back to GITHUB_TOKEN env var when config is empty."""
+        """Falls back to GITHUB_TOKEN env var when config is an OAuth token."""
         token = resolve_github_token(config_token="")
-        assert token == "ghp_env_token_67890"
+        assert token == "gho_env_token_67890"
+
+    @patch.dict("os.environ", {"GITHUB_TOKEN": "ghp_classic_pat_12345"})
+    def test_resolve_token_skips_classic_pat_env(self):
+        """Skips ghp_* classic PATs from GITHUB_TOKEN env var."""
+        token = resolve_github_token(config_token="")
+        assert token == ""
 
     @patch.dict("os.environ", {}, clear=True)
     def test_resolve_token_empty(self):
@@ -652,9 +658,14 @@ class TestGitHubAuth:
         assert token == ""
 
     def test_validate_token_valid(self):
-        """Accepts tokens >= 10 chars."""
-        assert validate_token("ghp_1234567890") is True
+        """Accepts OAuth tokens >= 10 chars (gho_, ghu_, etc.)."""
+        assert validate_token("gho_1234567890") is True
+        assert validate_token("ghu_1234567890") is True
         assert validate_token("a" * 10) is True
+
+    def test_validate_token_rejects_classic_pat(self):
+        """Rejects classic PATs (ghp_*)."""
+        assert validate_token("ghp_1234567890") is False
 
     def test_validate_token_empty(self):
         """Rejects empty/short tokens."""
@@ -672,7 +683,7 @@ class TestGitHubCopilotProvider:
     def _make_provider(self, **overrides) -> GitHubCopilotProvider:
         defaults = {
             "enabled": True,
-            "api_token": "ghp_test_token_1234567890",
+            "api_token": "gho_test_token_1234567890",
             "base_url": "https://api.githubcopilot.com",
             "default_model": "gpt-4o",
             "timeout": 30,
@@ -773,7 +784,7 @@ class TestGitHubCopilotProvider:
             import os
             os.environ.pop("GITHUB_TOKEN", None)
             p = self._make_provider(api_token="")
-            with pytest.raises(ProviderError, match="No valid API token"):
+            with pytest.raises(ProviderError, match="No valid Copilot token"):
                 p.chat([{"role": "user", "content": "Hi"}])
 
     # -- timeout retries ------------------------------------------------
