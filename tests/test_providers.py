@@ -16,7 +16,14 @@ from bigbrain.errors import (
     UserError,
 )
 from bigbrain.providers.base import BaseProvider, ProviderResponse
-from bigbrain.providers.config import LMStudioConfig, OllamaConfig, ProviderConfig
+from bigbrain.providers.config import (
+    GitHubCopilotConfig,
+    LMStudioConfig,
+    OllamaConfig,
+    ProviderConfig,
+)
+from bigbrain.providers.github_auth import resolve_github_token, validate_token
+from bigbrain.providers.github_copilot import GitHubCopilotProvider
 from bigbrain.providers.lm_studio import LMStudioProvider
 from bigbrain.providers.ollama import OllamaProvider
 from bigbrain.providers.registry import ProviderRegistry
@@ -616,3 +623,233 @@ class TestProviderRegistry:
         avail = reg.get_available_providers()
         names = [p.name for p in avail]
         assert names == ["up1", "up2"]
+
+
+# =====================================================================
+# 7. GitHubAuth (github_auth.py)
+# =====================================================================
+
+
+class TestGitHubAuth:
+    def test_resolve_token_from_config(self):
+        """Config value takes priority over environment."""
+        token = resolve_github_token(config_token="ghp_config_token_12345")
+        assert token == "ghp_config_token_12345"
+
+    @patch.dict("os.environ", {"GITHUB_TOKEN": "ghp_env_token_67890"})
+    def test_resolve_token_from_env(self):
+        """Falls back to GITHUB_TOKEN env var when config is empty."""
+        token = resolve_github_token(config_token="")
+        assert token == "ghp_env_token_67890"
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_resolve_token_empty(self):
+        """Returns empty string when nothing is set."""
+        # Remove GITHUB_TOKEN if present
+        import os
+        os.environ.pop("GITHUB_TOKEN", None)
+        token = resolve_github_token(config_token="")
+        assert token == ""
+
+    def test_validate_token_valid(self):
+        """Accepts tokens >= 10 chars."""
+        assert validate_token("ghp_1234567890") is True
+        assert validate_token("a" * 10) is True
+
+    def test_validate_token_empty(self):
+        """Rejects empty/short tokens."""
+        assert validate_token("") is False
+        assert validate_token("   ") is False
+        assert validate_token("short") is False
+
+
+# =====================================================================
+# 8. GitHubCopilotProvider (mocked HTTP)
+# =====================================================================
+
+
+class TestGitHubCopilotProvider:
+    def _make_provider(self, **overrides) -> GitHubCopilotProvider:
+        defaults = {
+            "enabled": True,
+            "api_token": "ghp_test_token_1234567890",
+            "base_url": "https://api.githubcopilot.com",
+            "default_model": "gpt-4o",
+            "timeout": 30,
+            "max_retries": 3,
+            "retry_delay": 0.01,
+        }
+        defaults.update(overrides)
+        return GitHubCopilotProvider(GitHubCopilotConfig(**defaults))
+
+    # -- is_available ---------------------------------------------------
+
+    def test_is_available_no_token(self):
+        """Returns False when no valid token is configured."""
+        p = self._make_provider(api_token="")
+        # Clear env to ensure no fallback
+        with patch.dict("os.environ", {}, clear=True):
+            import os
+            os.environ.pop("GITHUB_TOKEN", None)
+            assert p.is_available() is False
+
+    @patch("httpx.get")
+    def test_is_available_with_token(self, mock_get):
+        """Returns True when API responds successfully."""
+        mock_get.return_value = _mock_response(200, {"data": []})
+        p = self._make_provider()
+        assert p.is_available() is True
+
+    # -- complete delegates to chat -------------------------------------
+
+    @patch("httpx.post")
+    def test_complete_delegates_to_chat(self, mock_post):
+        """Verify complete() calls chat() under the hood."""
+        mock_post.return_value = _mock_response(200, {
+            "choices": [{"message": {"content": "delegated"}}],
+            "model": "gpt-4o",
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+        })
+        p = self._make_provider()
+        r = p.complete("test prompt")
+        assert r.text == "delegated"
+        # Verify the POST payload wraps prompt in a user message
+        payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1]["json"]
+        assert payload["messages"] == [{"role": "user", "content": "test prompt"}]
+
+    # -- chat success ---------------------------------------------------
+
+    @patch("httpx.post")
+    def test_chat_success(self, mock_post):
+        """Mock POST returning OpenAI-format response."""
+        mock_post.return_value = _mock_response(200, {
+            "choices": [{"message": {"content": "Hello from Copilot!"}}],
+            "model": "gpt-4o",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 8},
+        })
+        p = self._make_provider()
+        msgs = [{"role": "user", "content": "Hi"}]
+        r = p.chat(msgs)
+
+        assert r.text == "Hello from Copilot!"
+        assert r.model == "gpt-4o"
+        assert r.provider == "github_copilot"
+        assert r.usage["prompt_tokens"] == 10
+        assert r.usage["completion_tokens"] == 8
+
+    # -- auth failure ---------------------------------------------------
+
+    @patch("httpx.post")
+    def test_chat_auth_failure(self, mock_post):
+        """401 raises ProviderError with auth message."""
+        mock_post.return_value = _mock_response(401, {})
+        p = self._make_provider()
+        with pytest.raises(ProviderError, match="Authentication failed"):
+            p.chat([{"role": "user", "content": "Hi"}])
+
+    # -- rate limiting --------------------------------------------------
+
+    @patch("httpx.post")
+    def test_chat_rate_limited_then_success(self, mock_post):
+        """First call returns 429, retry succeeds."""
+        rate_resp = _mock_response(429, {})
+        rate_resp.headers = {"Retry-After": "0.01"}
+        ok_resp = _mock_response(200, {
+            "choices": [{"message": {"content": "ok"}}],
+            "model": "gpt-4o",
+            "usage": {},
+        })
+        mock_post.side_effect = [rate_resp, ok_resp]
+        p = self._make_provider(retry_delay=0.01)
+        r = p.chat([{"role": "user", "content": "Hi"}])
+        assert r.text == "ok"
+        assert mock_post.call_count == 2
+
+    # -- no token raises ------------------------------------------------
+
+    def test_chat_no_token_raises(self):
+        """Raises ProviderError about missing token."""
+        with patch.dict("os.environ", {}, clear=True):
+            import os
+            os.environ.pop("GITHUB_TOKEN", None)
+            p = self._make_provider(api_token="")
+            with pytest.raises(ProviderError, match="No valid API token"):
+                p.chat([{"role": "user", "content": "Hi"}])
+
+    # -- timeout retries ------------------------------------------------
+
+    @patch("httpx.post")
+    def test_chat_timeout_retries(self, mock_post):
+        """httpx.TimeoutException triggers retry."""
+        ok_resp = _mock_response(200, {
+            "choices": [{"message": {"content": "recovered"}}],
+            "model": "gpt-4o",
+            "usage": {},
+        })
+        mock_post.side_effect = [
+            httpx.TimeoutException("timed out"),
+            ok_resp,
+        ]
+        p = self._make_provider(retry_delay=0.01)
+        r = p.chat([{"role": "user", "content": "Hi"}])
+        assert r.text == "recovered"
+        assert mock_post.call_count == 2
+
+    # -- list_models ----------------------------------------------------
+
+    @patch("httpx.get")
+    def test_list_models(self, mock_get):
+        """Mock GET /models response."""
+        mock_get.return_value = _mock_response(200, {
+            "data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}],
+        })
+        p = self._make_provider()
+        models = p.list_models()
+        assert models == ["gpt-4o", "gpt-4o-mini"]
+
+
+# =====================================================================
+# 9. PreferredProvider (registry preferred routing)
+# =====================================================================
+
+
+class TestPreferredProvider:
+    def test_preferred_provider_tried_first(self):
+        """Register A, B with preferred=B; verify B is called first."""
+        reg = ProviderRegistry(preferred="beta")
+        reg.register(MockProvider("alpha"))
+        reg.register(MockProvider("beta"))
+        r = reg.complete("test")
+        assert r.provider == "beta"
+
+    def test_preferred_unavailable_falls_back(self):
+        """Preferred provider fails, next provider succeeds."""
+        reg = ProviderRegistry(preferred="failing")
+        reg.register(MockProvider("failing", fail_on_call=True))
+        reg.register(MockProvider("backup"))
+        r = reg.complete("test")
+        assert r.provider == "backup"
+
+    def test_preferred_empty_uses_registration_order(self):
+        """No preferred set, uses normal registration order."""
+        reg = ProviderRegistry(preferred="")
+        reg.register(MockProvider("first"))
+        reg.register(MockProvider("second"))
+        r = reg.complete("test")
+        assert r.provider == "first"
+
+    def test_preferred_property(self):
+        """registry.preferred returns the configured value."""
+        reg = ProviderRegistry(preferred="ollama")
+        assert reg.preferred == "ollama"
+        reg2 = ProviderRegistry()
+        assert reg2.preferred == ""
+
+    def test_from_config_passes_preferred(self):
+        """from_config reads preferred_provider field."""
+        cfg = ProviderConfig(
+            preferred_provider="ollama",
+            ollama=OllamaConfig(enabled=True),
+        )
+        reg = ProviderRegistry.from_config(cfg)
+        assert reg.preferred == "ollama"
