@@ -24,3 +24,5 @@ src/bigbrain/ingest/text_ingester.py
 src/bigbrain/kb/__init__.py
 src/bigbrain/kb/models.py
 src/bigbrain/orchestrator/__init__.py
+tests/test_config.py
+tests/test_errors.py
