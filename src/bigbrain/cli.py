@@ -269,6 +269,73 @@ def _handle_providers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_ask(args: argparse.Namespace) -> int:
+    """Answer a question using KB context + AI provider (RAG)."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty (no database found).")
+        print("  Run 'bigbrain ingest --source <path>' to populate it.")
+        return 1
+
+    from bigbrain.rag.pipeline import RAGPipeline
+    from bigbrain.errors import NoProviderAvailableError
+
+    try:
+        with RAGPipeline.from_config() as pipeline:
+            if not pipeline._registry.has_providers():
+                print("No AI providers are enabled.")
+                print("  Enable a provider in config/example.yaml (e.g., ollama, lm_studio, github_copilot)")
+                print("  Check status with: bigbrain providers")
+                return 1
+
+            mode = getattr(args, 'mode', 'ask')
+
+            print(f"Searching knowledge base...")
+
+            if mode == 'explain':
+                response = pipeline.explain(
+                    args.question,
+                    max_docs=args.context_docs,
+                    model=args.model,
+                )
+            else:
+                response = pipeline.ask(
+                    args.question,
+                    max_docs=args.context_docs,
+                    model=args.model,
+                )
+
+            if response.chunks_used == 0:
+                print("No relevant documents found in the knowledge base.")
+                print("  Try ingesting more content first.")
+                return 1
+
+            print(f"Found {response.chunks_used} relevant chunk(s) from {len(response.sources)} source(s)")
+            print()
+            print(response.answer)
+
+            # Attribution footer
+            print()
+            if response.provider and response.model:
+                print(f"— {response.provider}/{response.model}")
+            if response.sources:
+                print(f"— Sources: {len(response.sources)} document(s)")
+
+    except NoProviderAvailableError:
+        print("No AI provider is available. Check with: bigbrain providers")
+        return 1
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
 def _handle_kb_export(args: argparse.Namespace) -> int:
     """Export knowledge base to JSONL file."""
     from bigbrain.kb.store import KBStore
@@ -483,6 +550,33 @@ def _add_providers_parser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     return p
 
 
+def _add_ask_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``ask`` subcommand."""
+    p = subparsers.add_parser(
+        "ask",
+        help="Ask a question using KB context + AI (RAG)",
+        description=(
+            "Search the knowledge base for relevant context, then use an AI "
+            "provider to generate a well-formed answer."
+        ),
+    )
+    p.add_argument("question", type=str, help="The question to answer")
+    p.add_argument(
+        "--context-docs", type=int, default=5,
+        help="Number of KB documents to use as context (default: 5)",
+    )
+    p.add_argument(
+        "--model", type=str, default="",
+        help="Override the AI model to use",
+    )
+    p.add_argument(
+        "--mode", choices=["ask", "explain"], default="ask",
+        help="Answer mode: 'ask' for Q&A, 'explain' for concept explanation (default: ask)",
+    )
+    p.set_defaults(func=_handle_ask)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -508,6 +602,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_kb_export_parser(subparsers)
     _add_kb_import_parser(subparsers)
     _add_providers_parser(subparsers)
+    _add_ask_parser(subparsers)
 
     return parser
 
