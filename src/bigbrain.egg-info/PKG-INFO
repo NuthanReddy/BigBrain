@@ -12,3 +12,21 @@ Requires-Dist: beautifulsoup4>=4.12
 Requires-Dist: html2text>=2024.2
 Requires-Dist: tenacity>=8.0
 Requires-Dist: rich>=13.0
+Provides-Extra: postgres
+Requires-Dist: psycopg[binary]>=3.1; extra == "postgres"
+Requires-Dist: pgvector>=0.2; extra == "postgres"
+Provides-Extra: neo4j
+Requires-Dist: neo4j>=5.0; extra == "neo4j"
+Provides-Extra: qdrant
+Requires-Dist: qdrant-client>=1.7; extra == "qdrant"
+Provides-Extra: weaviate
+Requires-Dist: weaviate-client>=4.0; extra == "weaviate"
+Provides-Extra: pinecone
+Requires-Dist: pinecone-client>=3.0; extra == "pinecone"
+Provides-Extra: all-stores
+Requires-Dist: psycopg[binary]>=3.1; extra == "all-stores"
+Requires-Dist: pgvector>=0.2; extra == "all-stores"
+Requires-Dist: neo4j>=5.0; extra == "all-stores"
+Requires-Dist: qdrant-client>=1.7; extra == "all-stores"
+Requires-Dist: weaviate-client>=4.0; extra == "all-stores"
+Requires-Dist: pinecone-client>=3.0; extra == "all-stores"

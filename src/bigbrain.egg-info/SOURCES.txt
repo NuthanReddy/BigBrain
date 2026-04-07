@@ -69,11 +69,14 @@ src/bigbrain/rag/context.py
 src/bigbrain/rag/pipeline.py
 src/bigbrain/rag/prompts.py
 src/bigbrain/rag/retriever.py
+src/bigbrain/stores/__init__.py
+src/bigbrain/stores/base.py
 tests/test_change_detector.py
 tests/test_compile.py
 tests/test_config.py
 tests/test_distill.py
 tests/test_errors.py
+tests/test_hardening.py
 tests/test_kb_service.py
 tests/test_kb_store.py
 tests/test_notion.py

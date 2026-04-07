@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 10 – Production Hardening.** Progress bars, retry logic, performance optimization, enhanced logging, input validation.
+**Phase 11 – Polyglot Entity Store.** Pluggable backends: SQLite (default), PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone.
 
 ## Quick Start
 
@@ -458,6 +458,43 @@ bigbrain --log-format json status          # Structured JSON logs
 - Circuit breaker prevents repeated calls to failing providers
 - Connection pooling for HTTP requests
 
+## Entity Store Backends (Phase 11)
+
+BigBrain supports multiple storage backends for entities and relationships. SQLite is the default; external backends are available for larger deployments.
+
+### Supported Backends
+
+| Backend | Best For | Relationships | Vector Search |
+|---------|----------|---------------|---------------|
+| SQLite | Local/dev (default) | ✅ | Text only |
+| PostgreSQL + pgvector | Production SQL + vectors | ✅ | ✅ |
+| Neo4j | Graph queries | ✅ (native) | ❌ |
+| Qdrant | Vector similarity | ❌ | ✅ |
+| Weaviate | Vector + BM25 | ❌ | ✅ |
+| Pinecone | Managed vector | ❌ | ✅ |
+
+### Configuration
+
+```yaml
+entity_store:
+  backend: sqlite  # sqlite | postgres | neo4j | qdrant | weaviate | pinecone
+  # postgres_url: "postgresql://user:pass@localhost:5432/bigbrain"
+  # neo4j_url: "bolt://localhost:7687"
+  # qdrant_url: "http://localhost:6333"
+  # weaviate_url: "http://localhost:8080"
+  # pinecone_api_key: "your-key"
+```
+
+### Installation
+
+Backends are optional dependencies:
+```bash
+pip install -e ".[postgres]"     # PostgreSQL + pgvector
+pip install -e ".[neo4j]"        # Neo4j
+pip install -e ".[qdrant]"       # Qdrant
+pip install -e ".[all-stores]"   # All backends
+```
+
 ## Configuration
 
 1. Copy `config/example.yaml` and customize for your environment.
@@ -539,6 +576,14 @@ BigBrain/
 │   │   ├── base.py        # PluginBase, IngestPlugin, CompilePlugin, ProcessorPlugin ABCs
 │   │   ├── discovery.py   # Directory scanning + entry_points discovery
 │   │   └── loader.py      # PluginLoader – validate, filter, register
+│   ├── stores/            # Polyglot entity store backends (Phase 11 ✅)
+│   │   ├── base.py        # EntityStoreBackend ABC
+│   │   ├── sqlite_backend.py  # SQLite adapter (default, wraps KBStore)
+│   │   ├── postgres.py        # PostgreSQL + pgvector backend
+│   │   ├── neo4j_backend.py   # Neo4j graph backend
+│   │   ├── qdrant_backend.py  # Qdrant vector backend
+│   │   ├── weaviate_backend.py # Weaviate vector + BM25 backend
+│   │   └── pinecone_backend.py # Pinecone managed vector backend
 │   ├── progress.py        # Progress bars with rich fallback (Phase 10 ✅)
 │   ├── retry.py           # Retry decorator + circuit breaker (Phase 10 ✅)
 │   ├── http.py            # Shared httpx connection pool (Phase 10 ✅)
@@ -565,7 +610,7 @@ BigBrain/
 ### Running Tests
 
 ```bash
-# Run full test suite (479+ tests)
+# Run full test suite (524+ tests)
 python -m pytest tests/ -v
 
 # Run by module
@@ -579,6 +624,7 @@ python -m pytest tests/test_notion.py -v   # Notion integration
 python -m pytest tests/test_orchestrator.py -v # Orchestrator pipeline
 python -m pytest tests/test_plugins.py -v  # Plugin system
 python -m pytest tests/test_hardening.py -v # Production hardening
+python -m pytest tests/test_stores.py -v   # Entity store backends
 ```
 
 ## Phase Roadmap
@@ -596,13 +642,14 @@ python -m pytest tests/test_hardening.py -v # Production hardening
 | 8     | Multi-source ingestion (URLs, APIs)          ✅   |
 | 9     | Plugin system and extensibility               ✅   |
 | 10    | Production hardening and performance optimization ✅ |
-| 11    | Polyglot entity store (Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |
+| 11    | Polyglot entity store (Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) ✅ |
 
-### Planned Phase 11 Scope
+### Phase 11 Summary
 
-- Add pluggable backends for distilled entities/relationships and vector retrieval.
-- Target backends: PostgreSQL + pgvector, Neo4j, Qdrant, Weaviate, Pinecone.
-- Keep SQLite as the default local/dev backend while adding configurable provider-backed storage for larger deployments.
+- Pluggable entity store backends via `EntityStoreBackend` ABC.
+- SQLite (default, zero-config), PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone.
+- `StoreConfig` dataclass with per-backend connection settings.
+- Optional dependencies via `pyproject.toml` extras.
 
 ## License
 

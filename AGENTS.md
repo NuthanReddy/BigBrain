@@ -49,6 +49,13 @@
 | `bigbrain.plugins.base` | `PluginBase`, `IngestPlugin`, `CompilePlugin`, `ProcessorPlugin` ABCs; `PluginInfo` dataclass |
 | `bigbrain.plugins.discovery` | `discover_from_directory()` – scans `.py` files for `PluginBase` subclasses; `discover_from_entry_points()` – loads `bigbrain.plugins` entry points |
 | `bigbrain.plugins.loader` | `PluginLoader` – discovers, validates, filters (enabled/disabled), and registers plugins with ingest registry |
+| `bigbrain.stores.base` | `EntityStoreBackend` ABC – pluggable interface for entity/relationship storage backends |
+| `bigbrain.stores.sqlite_backend` | `SqliteBackend` – default backend wrapping existing `KBStore` (zero-config) |
+| `bigbrain.stores.postgres` | `PostgresBackend` – PostgreSQL + pgvector for SQL entities and vector similarity search |
+| `bigbrain.stores.neo4j_backend` | `Neo4jBackend` – graph-native entity nodes and relationship edges via Cypher |
+| `bigbrain.stores.qdrant_backend` | `QdrantBackend` – vector similarity search with hash-based pseudo-vectors |
+| `bigbrain.stores.weaviate_backend` | `WeaviateBackend` – vector + BM25 hybrid search |
+| `bigbrain.stores.pinecone_backend` | `PineconeBackend` – managed vector search with batched upsert |
 | `bigbrain.progress` | Progress bar context manager using rich (with graceful fallback); `print_status()` and `print_table()` helpers |
 | `bigbrain.retry` | `with_retry()` decorator with exponential backoff; `CircuitBreaker` for repeated failure protection |
 | `bigbrain.http` | `get_http_client()` – shared `httpx.Client` with connection pooling; `close_http_client()` teardown |
@@ -65,6 +72,7 @@
 | `bigbrain.compile` | Render reusable outputs from stored/distilled content |
 | `bigbrain.notion` | **Active (Phase 6)** – Bidirectional sync between KB and Notion workspace; import, export, and sync engine |
 | `bigbrain.plugins` | **Active (Phase 9)** – Extensible plugin system for custom ingesters, compilers, and processors; directory scanning + entry_points discovery |
+| `bigbrain.stores` | **Active (Phase 11)** – Polyglot entity store backends: SQLite (default), PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone; `EntityStoreBackend` ABC + `StoreConfig` |
 | (top-level modules) | **Active (Phase 10)** – Production hardening: `progress.py` (rich progress bars), `retry.py` (retry + circuit breaker), `http.py` (connection pooling), `validation.py` (input sanitization) |
 
 ### Ingestion Pipeline (Phase 1)
@@ -214,6 +222,7 @@ BigBrain/
 │   ├── test_orchestrator.py         # Change detector, orchestrator pipeline, KB file hashes
 │   ├── test_plugins.py              # Plugin base, discovery, loader, example plugins
 │   ├── test_hardening.py            # Progress, retry, HTTP pool, validation, logging tests
+│   ├── test_stores.py               # Entity store backends: ABC, SQLite adapter, mocked external backends
 │   ├── ingest/                      # Ingestion pipeline tests
 │   │   ├── test_discovery.py
 │   │   ├── test_registry.py
@@ -304,6 +313,15 @@ BigBrain/
 │           ├── base.py              # PluginBase, IngestPlugin, CompilePlugin, ProcessorPlugin ABCs
 │           ├── discovery.py         # Directory scanning + entry_points discovery
 │           └── loader.py            # PluginLoader – validate, filter, register
+│       └── stores/
+│           ├── __init__.py          # Polyglot entity store exports (EntityStoreBackend)
+│           ├── base.py              # EntityStoreBackend ABC – pluggable storage interface
+│           ├── sqlite_backend.py    # SqliteBackend – wraps KBStore (default, zero-config)
+│           ├── postgres.py          # PostgresBackend – PostgreSQL + pgvector
+│           ├── neo4j_backend.py     # Neo4jBackend – graph-native entities and relationships
+│           ├── qdrant_backend.py    # QdrantBackend – vector similarity search
+│           ├── weaviate_backend.py  # WeaviateBackend – vector + BM25 hybrid search
+│           └── pinecone_backend.py  # PineconeBackend – managed vector with batched upsert
 │       ├── progress.py              # Progress bars with rich (graceful fallback)
 │       ├── retry.py                 # with_retry() decorator + CircuitBreaker
 │       ├── http.py                  # Shared httpx.Client with connection pooling
@@ -316,7 +334,7 @@ BigBrain/
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–10)
+### Current (Phase 0–11)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3) and URL/API ingestion (Phase 8).
@@ -328,11 +346,11 @@ BigBrain/
 - **html2text** – HTML-to-text conversion for URL ingestion (Phase 8).
 - **rich** – Progress bars, styled output, formatted tables (Phase 10).
 - **tenacity** – Retry with exponential backoff for AI provider calls (Phase 10).
-
-### Future
-| Phase | Integration |
-|---|---|
-| Phase 11 | Polyglot entity/vector store backends (PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) |
+- **psycopg** (`>=3.1`) + **pgvector** (`>=0.2`) – PostgreSQL + pgvector entity store backend (Phase 11, optional).
+- **neo4j** (`>=5.0`) – Neo4j graph entity store backend (Phase 11, optional).
+- **qdrant-client** (`>=1.7`) – Qdrant vector entity store backend (Phase 11, optional).
+- **weaviate-client** (`>=4.0`) – Weaviate vector + BM25 entity store backend (Phase 11, optional).
+- **pinecone** (`>=3.0`) – Pinecone managed vector entity store backend (Phase 11, optional).
 
 ## Phase Roadmap
 
@@ -350,5 +368,5 @@ BigBrain/
 | 8 | Multi-source Ingestion | URL/web page ingestion and REST API JSON ingestion ✅ |
 | 9 | Plugin system | Extensible plugin architecture for custom ingesters, compilers, processors ✅ |
 | 10 | Production hardening | Progress bars, retry/circuit-breaker, HTTP pooling, input validation, enhanced logging ✅ |
-| 11 | Polyglot Entity Store | Pluggable distilled-entity/vector backends; keep SQLite default for local/dev |
+| 11 | Polyglot Entity Store | Pluggable distilled-entity/vector backends (SQLite default, Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) ✅ |
 

@@ -94,3 +94,12 @@ plugins:
   auto_discover: true
   enabled_plugins: []
   disabled_plugins: []
+
+# Entity store backend (Phase 11)
+entity_store:
+  backend: sqlite  # sqlite | postgres | neo4j | qdrant | weaviate | pinecone
+  # postgres_url: "postgresql://user:pass@localhost:5432/bigbrain"
+  # neo4j_url: "bolt://localhost:7687"
+  # qdrant_url: "http://localhost:6333"
+  # weaviate_url: "http://localhost:8080"
+  # pinecone_api_key: ""

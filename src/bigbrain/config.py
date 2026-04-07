@@ -92,6 +92,27 @@ class NotionConfig:
 
 
 @dataclass
+class StoreConfig:
+    """Configuration for the polyglot entity store."""
+    backend: str = "sqlite"  # sqlite | postgres | neo4j | qdrant | weaviate | pinecone
+    # PostgreSQL + pgvector
+    postgres_url: str = ""  # e.g., "postgresql://user:pass@localhost:5432/bigbrain"
+    # Neo4j
+    neo4j_url: str = ""  # e.g., "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = ""
+    # Qdrant
+    qdrant_url: str = ""  # e.g., "http://localhost:6333"
+    qdrant_collection: str = "bigbrain_entities"
+    # Weaviate
+    weaviate_url: str = ""  # e.g., "http://localhost:8080"
+    # Pinecone
+    pinecone_api_key: str = ""
+    pinecone_index: str = "bigbrain-entities"
+    pinecone_environment: str = ""
+
+
+@dataclass
 class PluginConfig:
     """Configuration for the plugin system."""
     plugins_dir: str = "plugins"  # directory to scan for plugin files
@@ -137,6 +158,9 @@ class BigBrainConfig:
 
     # plugins
     plugins: PluginConfig = field(default_factory=PluginConfig)
+
+    # entity store
+    entity_store: StoreConfig = field(default_factory=StoreConfig)
 
     @property
     def kb_db_path(self) -> str:
@@ -261,6 +285,19 @@ def _flatten_yaml(yaml_data: dict[str, Any]) -> dict[str, Any]:
             **plugin_kwargs,
         })
 
+    # Special handling for entity_store → StoreConfig
+    if "entity_store" in yaml_data and isinstance(yaml_data["entity_store"], dict):
+        store_data = yaml_data["entity_store"]
+        store_defaults = StoreConfig()
+        store_kwargs = {}
+        for store_field in fields(StoreConfig):
+            if store_field.name in store_data:
+                store_kwargs[store_field.name] = store_data[store_field.name]
+        flat["entity_store"] = StoreConfig(**{
+            **{f.name: getattr(store_defaults, f.name) for f in fields(StoreConfig)},
+            **store_kwargs,
+        })
+
     # Special handling for providers → ProviderConfig
     if "providers" in yaml_data and isinstance(yaml_data["providers"], dict):
         prov_data = yaml_data["providers"]
@@ -353,6 +390,7 @@ _DISTILL_ENV_PREFIX = "BIGBRAIN_DISTILL_"
 _COMPILE_ENV_PREFIX = "BIGBRAIN_COMPILE_"
 _NOTION_ENV_PREFIX = "BIGBRAIN_NOTION_"
 _PLUGINS_ENV_PREFIX = "BIGBRAIN_PLUGINS_"
+_STORE_ENV_PREFIX = "BIGBRAIN_STORE_"
 
 # Fields whose env values should be interpreted as booleans.
 _BOOL_FIELDS: set[str] = {f.name for f in fields(BigBrainConfig) if f.type == "bool"}
@@ -407,6 +445,9 @@ _PLUGINS_LIST_FIELDS: set[str] = {
     f.name for f in fields(PluginConfig) if f.type == "list[str]"
 }
 
+# StoreConfig field metadata for type coercion
+_STORE_VALID_FIELDS: set[str] = {f.name for f in fields(StoreConfig)}
+
 
 def _coerce_bool(value: str) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
@@ -452,6 +493,7 @@ def load_env_overrides() -> dict[str, Any]:
     compile_overrides: dict[str, Any] = {}
     notion_overrides: dict[str, Any] = {}
     plugins_overrides: dict[str, Any] = {}
+    store_overrides: dict[str, Any] = {}
 
     for key, value in os.environ.items():
         if not key.startswith(_ENV_PREFIX):
@@ -541,6 +583,14 @@ def load_env_overrides() -> dict[str, Any]:
                 compile_overrides[comp_field] = value
             continue
 
+        # Check for BIGBRAIN_STORE_*
+        if key.startswith(_STORE_ENV_PREFIX):
+            store_field = key[len(_STORE_ENV_PREFIX):].lower()
+            if store_field not in _STORE_VALID_FIELDS:
+                continue
+            store_overrides[store_field] = value
+            continue
+
         # Top-level BIGBRAIN_* fields
         field_name = key[len(_ENV_PREFIX):].lower()
         if field_name not in _VALID_FIELD_NAMES:
@@ -564,6 +614,8 @@ def load_env_overrides() -> dict[str, Any]:
         overrides["notion"] = notion_overrides
     if plugins_overrides:
         overrides["plugins"] = plugins_overrides
+    if store_overrides:
+        overrides["entity_store"] = store_overrides
 
     return overrides
 
@@ -703,6 +755,20 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
                 merged["plugins"] = PluginConfig(**plugins_kwargs)
             elif "plugins" in yaml_values:
                 merged["plugins"] = base_plugins
+            # else: dataclass default is used automatically
+        elif f.name == "entity_store":
+            # Special merge: defaults → YAML → env (field-level)
+            base_store = yaml_values.get("entity_store", StoreConfig())
+            env_store = env_values.get("entity_store")
+            if env_store:
+                store_kwargs = {
+                    fld.name: getattr(base_store, fld.name)
+                    for fld in fields(StoreConfig)
+                }
+                store_kwargs.update(env_store)
+                merged["entity_store"] = StoreConfig(**store_kwargs)
+            elif "entity_store" in yaml_values:
+                merged["entity_store"] = base_store
             # else: dataclass default is used automatically
         elif f.name == "providers":
             # Special merge: defaults → YAML → env (field-level)
