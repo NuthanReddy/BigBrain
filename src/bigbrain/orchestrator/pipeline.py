@@ -163,14 +163,17 @@ class Orchestrator:
         """Run distillation on KB documents."""
         from bigbrain.distill.pipeline import DistillPipeline
         from bigbrain.providers.registry import ProviderRegistry
+        from bigbrain.stores.factory import create_entity_store
 
         registry = ProviderRegistry.from_config(self._config.providers)
         if not registry.has_providers():
             logger.warning("No AI providers available — skipping distillation")
             return
 
+        entity_backend = create_entity_store(self._config.entity_store, self._store)
         pipeline = DistillPipeline(
             store=self._store, registry=registry, config=self._config.distillation,
+            entity_store=entity_backend,
         )
 
         docs = self._store.list_documents(limit=9999)

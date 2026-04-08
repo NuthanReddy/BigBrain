@@ -7,7 +7,7 @@ concurrently) and across documents (configurable worker pool).
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from bigbrain.config import BigBrainConfig, DistillConfig, load_config
 from bigbrain.distill.chunker import chunk_document
@@ -20,6 +20,9 @@ from bigbrain.kb.store import KBStore
 from bigbrain.logging_config import get_logger
 from bigbrain.progress import progress_bar
 from bigbrain.providers.registry import ProviderRegistry
+
+if TYPE_CHECKING:
+    from bigbrain.stores.base import EntityStoreBackend
 
 logger = get_logger(__name__)
 
@@ -48,6 +51,7 @@ class DistillPipeline:
         config: DistillConfig | None = None,
         *,
         workers: int = _DEFAULT_WORKERS,
+        entity_store: EntityStoreBackend | None = None,
     ) -> None:
         self._store = store
         self._registry = registry
@@ -56,6 +60,15 @@ class DistillPipeline:
         self._summarizer = Summarizer(registry)
         self._extractor = EntityExtractor(registry)
         self._relationship_builder = RelationshipBuilder(registry)
+        self._entity_store = entity_store  # lazy-init to SqliteBackend if None
+
+    @property
+    def entity_store(self) -> EntityStoreBackend:
+        """Return the configured entity store, defaulting to SqliteBackend."""
+        if self._entity_store is None:
+            from bigbrain.stores.sqlite_backend import SqliteBackend
+            self._entity_store = SqliteBackend(self._store)
+        return self._entity_store
 
     @classmethod
     def from_config(cls, config: BigBrainConfig | None = None) -> DistillPipeline:
@@ -64,9 +77,16 @@ class DistillPipeline:
             config = load_config()
         store = KBStore(config.kb_db_path)
         registry = ProviderRegistry.from_config(config.providers)
-        return cls(store=store, registry=registry, config=config.distillation)
+        from bigbrain.stores.factory import create_entity_store
+        entity_backend = create_entity_store(config.entity_store, store)
+        return cls(
+            store=store, registry=registry, config=config.distillation,
+            entity_store=entity_backend,
+        )
 
     def close(self) -> None:
+        if self._entity_store is not None:
+            self._entity_store.close()
         self._store.close()
 
     def __enter__(self) -> DistillPipeline:
@@ -138,7 +158,7 @@ class DistillPipeline:
         # Load existing entity names for dedup in incremental mode
         existing_names: set[str] = set()
         if do_entities and not force:
-            existing = self._store.get_entities(doc.id)
+            existing = self.entity_store.get_entities(doc.id)
             existing_names = {" ".join(e.name.lower().strip().split()) for e in existing}
 
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -171,7 +191,7 @@ class DistillPipeline:
             # Load existing entities from KB if we didn't extract fresh ones
             entities_for_rels = result.entities
             if not entities_for_rels and "entities" not in steps:
-                entities_for_rels = self._store.get_entities(doc.id)
+                entities_for_rels = self.entity_store.get_entities(doc.id)
                 logger.info("Loaded %d existing entities from KB", len(entities_for_rels))
 
             if entities_for_rels:
@@ -192,9 +212,9 @@ class DistillPipeline:
         if result.summaries:
             self._store.save_summaries(result.summaries)
         if result.entities:
-            self._store.save_entities(result.entities)
+            self.entity_store.save_entities(result.entities)
         if result.relationships:
-            self._store.save_relationships(result.relationships)
+            self.entity_store.save_relationships(result.relationships)
 
         return result
 
