@@ -169,8 +169,60 @@ class NotionImporter:
             text = self._extract_rich_text(data.get("rich_text", []))
             level = {"heading_1": 1, "heading_2": 2, "heading_3": 3}[btype]
             return f"{'#' * level} {text}"
+        if btype == "image":
+            image_data = data
+            url = ""
+            if image_data.get("type") == "external":
+                url = image_data.get("external", {}).get("url", "")
+            elif image_data.get("type") == "file":
+                url = image_data.get("file", {}).get("url", "")
+
+            caption = self._extract_rich_text(image_data.get("caption", []))
+
+            if url:
+                ocr_text = self._ocr_image(url)
+                parts: list[str] = []
+                if caption:
+                    parts.append(f"[Image: {caption}]")
+                if ocr_text:
+                    parts.append(f"[OCR: {ocr_text}]")
+                elif not caption:
+                    parts.append("[Image]")
+                return " ".join(parts)
+            return f"[Image: {caption}]" if caption else "[Image]"
 
         return ""
+
+    @staticmethod
+    def _ocr_image(url: str) -> str:
+        """Download an image and extract text via OCR. Returns empty string on failure."""
+        try:
+            import httpx
+            from io import BytesIO
+
+            from PIL import Image
+
+            resp = httpx.get(url, timeout=15, follow_redirects=True)
+            resp.raise_for_status()
+
+            image = Image.open(BytesIO(resp.content))
+
+            try:
+                import pytesseract
+
+                text = pytesseract.image_to_string(image).strip()
+                if text:
+                    logger.debug("OCR extracted %d chars from image", len(text))
+                    return text
+            except ImportError:
+                logger.debug("pytesseract not available, skipping OCR")
+            except Exception as exc:
+                logger.debug("OCR failed: %s", exc)
+
+            return ""
+        except Exception as exc:
+            logger.debug("Failed to download image for OCR: %s", exc)
+            return ""
 
     @staticmethod
     def _extract_rich_text(rich_text: list[dict[str, Any]]) -> str:

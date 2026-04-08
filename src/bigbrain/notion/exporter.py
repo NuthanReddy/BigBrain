@@ -205,3 +205,82 @@ def _split_text(text: str, max_len: int = 1900) -> list[str]:
         parts.append(text[:split])
         text = text[split:].lstrip()
     return parts
+
+
+# ------------------------------------------------------------------
+# Rich block builders
+# ------------------------------------------------------------------
+
+
+def _code_block(code: str, language: str = "mermaid") -> dict:
+    """Create a code block (for Mermaid diagrams, etc.)."""
+    return {
+        "object": "block",
+        "type": "code",
+        "code": {
+            "rich_text": [{"type": "text", "text": {"content": code[:2000]}}],
+            "language": language,
+        },
+    }
+
+
+def _callout(text: str, emoji: str = "\U0001f4a1") -> dict:
+    """Create a callout block for key concepts."""
+    return {
+        "object": "block",
+        "type": "callout",
+        "callout": {
+            "rich_text": [{"type": "text", "text": {"content": text[:2000]}}],
+            "icon": {"type": "emoji", "emoji": emoji},
+        },
+    }
+
+
+def _toggle(title: str, children: list[dict] | None = None) -> dict:
+    """Create a toggle block (expandable section)."""
+    block: dict = {
+        "object": "block",
+        "type": "toggle",
+        "toggle": {
+            "rich_text": [{"type": "text", "text": {"content": title[:2000]}}],
+        },
+    }
+    if children:
+        block["toggle"]["children"] = children[:100]
+    return block
+
+
+def _table_row(cells: list[str]) -> dict:
+    """Create a table row."""
+    return {
+        "type": "table_row",
+        "table_row": {
+            "cells": [[{"type": "text", "text": {"content": c[:2000]}}] for c in cells],
+        },
+    }
+
+
+def _table(rows: list[list[str]], has_header: bool = True) -> dict:
+    """Create a table block with rows."""
+    if not rows:
+        return _paragraph("(empty table)")
+    width = len(rows[0])
+    return {
+        "object": "block",
+        "type": "table",
+        "table": {
+            "table_width": width,
+            "has_column_header": has_header,
+            "has_row_header": False,
+            "children": [_table_row(row) for row in rows],
+        },
+    }
+
+
+def _equation(expression: str) -> dict:
+    """Create an equation block (KaTeX)."""
+    return {
+        "object": "block",
+        "type": "equation",
+        "equation": {"expression": expression},
+    }

@@ -17,6 +17,7 @@ src/bigbrain.egg-info/requires.txt
 src/bigbrain.egg-info/top_level.txt
 src/bigbrain/compile/__init__.py
 src/bigbrain/compile/cheatsheet.py
+src/bigbrain/compile/diagrams.py
 src/bigbrain/compile/flashcard.py
 src/bigbrain/compile/markdown.py
 src/bigbrain/compile/models.py
@@ -71,6 +72,12 @@ src/bigbrain/rag/prompts.py
 src/bigbrain/rag/retriever.py
 src/bigbrain/stores/__init__.py
 src/bigbrain/stores/base.py
+src/bigbrain/stores/neo4j_backend.py
+src/bigbrain/stores/pinecone_backend.py
+src/bigbrain/stores/postgres.py
+src/bigbrain/stores/qdrant_backend.py
+src/bigbrain/stores/sqlite_backend.py
+src/bigbrain/stores/weaviate_backend.py
 tests/test_change_detector.py
 tests/test_compile.py
 tests/test_config.py
@@ -84,3 +91,4 @@ tests/test_orchestrator.py
 tests/test_plugins.py
 tests/test_providers.py
 tests/test_rag.py
+tests/test_stores.py

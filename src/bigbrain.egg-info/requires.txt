@@ -7,6 +7,8 @@ beautifulsoup4>=4.12
 html2text>=2024.2
 tenacity>=8.0
 rich>=13.0
+pytesseract>=0.3
+Pillow>=10.0
 
 [all-stores]
 psycopg[binary]>=3.1
@@ -14,13 +16,13 @@ pgvector>=0.2
 neo4j>=5.0
 qdrant-client>=1.7
 weaviate-client>=4.0
-pinecone-client>=3.0
+pinecone>=3.0
 
 [neo4j]
 neo4j>=5.0
 
 [pinecone]
-pinecone-client>=3.0
+pinecone>=3.0
 
 [postgres]
 psycopg[binary]>=3.1

@@ -366,6 +366,11 @@ notion:
   auto_create_pages: true
 ```
 
+### Visual Content
+- **OCR**: Images in Notion pages are automatically OCR'd during import (requires Tesseract)
+- **Diagrams**: Compiled pages include Mermaid flowcharts and mindmaps
+- **Rich blocks**: Callouts, toggles, tables, code blocks, equations in Notion exports
+
 ## Incremental Updates (Phase 7)
 
 Automatically detect changed files and run only the necessary pipeline steps.
