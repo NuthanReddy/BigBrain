@@ -332,7 +332,210 @@ def _handle_compile(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    # Export to Notion if requested
+    to_notion = getattr(args, 'to_notion', False)
+    if to_notion:
+        return _compile_to_notion(cfg, fmt, args)
+
     return 0
+
+
+def _compile_to_notion(cfg, fmt: str, args) -> int:
+    """Write compiled output to Notion under Big Brain/<doc>/<format>."""
+    from bigbrain.notion.client import NotionClient
+    from bigbrain.notion.exporter import _paragraph, _heading, _bulleted, _divider
+    from bigbrain.kb.store import KBStore
+
+    client = NotionClient.from_config(cfg.notion)
+    if not client.is_available():
+        print("Notion is not available. Check BIGBRAIN_NOTION_TOKEN.")
+        return 1
+
+    store = KBStore(cfg.kb_db_path)
+
+    # Find or create "Big Brain" root page
+    notion_parent = getattr(args, 'notion_parent', '') or ''
+    if not notion_parent:
+        pages = client.search_pages("Big Brain", page_size=5)
+        bb_page = None
+        for p in pages:
+            if client.get_page_title(p).strip() == "Big Brain":
+                bb_page = p
+                break
+
+        if bb_page:
+            bb_id = bb_page["id"]
+            print(f"Found 'Big Brain' page: {bb_id[:12]}")
+        else:
+            all_pages = client.search_pages("", page_size=1)
+            if not all_pages:
+                print("No pages found in Notion workspace.")
+                store.close()
+                return 1
+            root_parent = all_pages[0].get("parent", {})
+            root_id = root_parent.get("page_id", all_pages[0]["id"]) if root_parent.get("type") == "page_id" else all_pages[0]["id"]
+
+            print("Creating 'Big Brain' page...")
+            page = client.create_page(root_id, "Big Brain", children=[
+                _paragraph("BigBrain knowledge base — compiled study materials."),
+            ])
+            bb_id = page["id"]
+            print(f"  Created: {bb_id[:12]}")
+    else:
+        bb_id = notion_parent
+
+    doc_id_filter = getattr(args, 'doc_id', '') or ''
+    if doc_id_filter:
+        docs = [store.get_document(doc_id_filter)]
+        docs = [d for d in docs if d is not None]
+    else:
+        source_type = getattr(args, 'type', '') or None
+        docs = store.list_documents(source_type=source_type, limit=100)
+
+    for doc in docs:
+        print(f"\n  {doc.title}")
+
+        # Find or create doc page under Big Brain
+        doc_pages = client.search_pages(doc.title, page_size=3)
+        doc_page_id = None
+        for dp in doc_pages:
+            if client.get_page_title(dp).strip() == doc.title:
+                dp_parent = dp.get("parent", {})
+                if dp_parent.get("page_id") == bb_id:
+                    doc_page_id = dp["id"]
+                    break
+
+        if not doc_page_id:
+            dp = client.create_page(bb_id, doc.title, children=[
+                _paragraph(f"Source: {doc.source.file_path if doc.source else 'unknown'}"),
+            ])
+            doc_page_id = dp["id"]
+            print(f"    Created doc page: {doc_page_id[:12]}")
+
+        entities = store.get_entities(doc.id)
+        relationships = store.get_relationships(doc.id)
+        summaries = store.get_summaries(doc.id)
+
+        if not entities and not summaries:
+            print("    No distilled content — skipping")
+            continue
+
+        blocks = _build_notion_blocks(fmt, doc, entities, relationships, summaries)
+        if not blocks:
+            print("    No content to write")
+            continue
+
+        format_title = fmt.replace("_", " ").title()
+
+        # Find existing format page under doc page
+        existing_fmt_id = None
+        try:
+            child_blocks = client.get_page_blocks(doc_page_id)
+            for cb in child_blocks:
+                if cb.get("type") == "child_page":
+                    child_title = cb.get("child_page", {}).get("title", "")
+                    if child_title == format_title:
+                        existing_fmt_id = cb["id"]
+                        break
+        except Exception:
+            pass
+
+        batch_size = 100
+
+        if existing_fmt_id:
+            # Update existing page — clear old blocks, append new
+            client.update_page_blocks(existing_fmt_id, blocks[:batch_size])
+            remaining_blocks = blocks[batch_size:]
+            while remaining_blocks:
+                batch = remaining_blocks[:batch_size]
+                remaining_blocks = remaining_blocks[batch_size:]
+                client._client.blocks.children.append(block_id=existing_fmt_id, children=batch)
+            fmt_page_id = existing_fmt_id
+            print(f"    \u2713 {format_title}: updated {fmt_page_id[:12]} ({len(blocks)} blocks)")
+        else:
+            # Create new page
+            first_batch = blocks[:batch_size]
+            remaining_blocks = blocks[batch_size:]
+            fmt_page = client.create_page(doc_page_id, format_title, children=first_batch)
+            fmt_page_id = fmt_page["id"]
+            while remaining_blocks:
+                batch = remaining_blocks[:batch_size]
+                remaining_blocks = remaining_blocks[batch_size:]
+                client._client.blocks.children.append(block_id=fmt_page_id, children=batch)
+            print(f"    \u2713 {format_title}: created {fmt_page_id[:12]} ({len(blocks)} blocks)")
+
+        print(f"    \u2713 {format_title}: {fmt_page_id[:12]} ({len(blocks)} blocks)")
+
+    store.close()
+    print("\nNotion export complete!")
+    return 0
+
+
+def _build_notion_blocks(fmt, doc, entities, relationships, summaries):
+    """Build Notion blocks for a given compile format."""
+    from bigbrain.notion.exporter import _paragraph, _heading, _bulleted, _divider
+    blocks = []
+
+    if fmt == "cheatsheet":
+        by_type = {}
+        for e in entities:
+            by_type.setdefault(e.entity_type, []).append(e)
+        for etype, ents in sorted(by_type.items()):
+            blocks.append(_heading(etype.replace("_", " ").title(), level=2))
+            for e in sorted(ents, key=lambda x: x.name)[:30]:
+                desc = f" \u2014 {e.description}" if e.description else ""
+                blocks.append(_bulleted((e.name + desc)[:1900]))
+        if relationships:
+            entity_map = {e.id: e.name for e in entities}
+            blocks.append(_divider())
+            blocks.append(_heading("Relationships", level=2))
+            for r in relationships[:30]:
+                src = entity_map.get(r.source_entity_id, "?")
+                tgt = entity_map.get(r.target_entity_id, "?")
+                blocks.append(_bulleted(f"{src} \u2192 {r.relationship_type} \u2192 {tgt}"))
+
+    elif fmt == "markdown":
+        if summaries:
+            blocks.append(_heading("Summary", level=2))
+            for s in summaries:
+                for para in s.content.split("\n\n"):
+                    if para.strip():
+                        blocks.append(_paragraph(para.strip()[:1900]))
+        if entities:
+            blocks.append(_heading("Key Concepts", level=2))
+            for e in entities[:40]:
+                desc = f" \u2014 {e.description}" if e.description else ""
+                blocks.append(_bulleted((e.name + desc)[:1900]))
+
+    elif fmt == "study_guide":
+        if summaries:
+            blocks.append(_heading("Overview", level=2))
+            for s in summaries:
+                blocks.append(_paragraph(s.content[:1900]))
+        if entities:
+            blocks.append(_heading("Core Concepts", level=2))
+            for e in entities[:30]:
+                blocks.append(_heading(e.name, level=3))
+                if e.description:
+                    blocks.append(_paragraph(e.description[:1900]))
+        if relationships:
+            entity_map = {e.id: e.name for e in entities}
+            blocks.append(_heading("Connections", level=2))
+            for r in relationships[:20]:
+                src = entity_map.get(r.source_entity_id, "?")
+                tgt = entity_map.get(r.target_entity_id, "?")
+                blocks.append(_bulleted(f"{src} {r.relationship_type} {tgt}"))
+
+    else:
+        if summaries:
+            blocks.append(_heading("Content", level=2))
+            blocks.append(_paragraph(summaries[0].content[:1900]))
+        if entities:
+            blocks.append(_heading("Topics", level=2))
+            for e in entities[:30]:
+                blocks.append(_bulleted(f"{e.name}: {e.description}"[:1900]))
+
+    return blocks
 
 
 def _handle_update(args: argparse.Namespace) -> int:
@@ -1015,6 +1218,14 @@ def _add_compile_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--output", "-o", type=str, default="",
         help="Output file path (default: auto-generate in build/ directory)",
     )
+    p.add_argument(
+        "--to-notion", action="store_true", default=False,
+        help="Write compiled output to Notion under 'Big Brain/<doc>/<format>' pages",
+    )
+    p.add_argument(
+        "--notion-parent", type=str, default="",
+        help="Notion parent page ID for --to-notion (default: creates 'Big Brain' under first workspace page)",
+    )
     p.set_defaults(func=_handle_compile)
     return p
 
@@ -1304,6 +1515,73 @@ def _handle_notion(args: argparse.Namespace) -> int:
             print(f"  Errors:   {len(result.errors)}")
         return 0
 
+    elif action == "cleanup":
+        from bigbrain.notion.client import NotionClient
+        client = NotionClient.from_config(cfg.notion)
+        if not client.is_available():
+            print("Notion is not available. Check your token.")
+            return 1
+
+        print("Scanning for duplicate pages...")
+
+        # Find all "Big Brain" pages — keep first, archive rest
+        bb_pages = []
+        all_pages = client.search_pages("Big Brain", page_size=20)
+        for p in all_pages:
+            if client.get_page_title(p).strip() == "Big Brain":
+                bb_pages.append(p)
+
+        removed = 0
+        if len(bb_pages) > 1:
+            keep = bb_pages[0]
+            print(f"  Keeping Big Brain: {keep['id'][:12]}")
+            for dup in bb_pages[1:]:
+                try:
+                    client._client.pages.update(page_id=dup["id"], archived=True)
+                    removed += 1
+                    print(f"  Archived duplicate Big Brain: {dup['id'][:12]}")
+                except Exception as exc:
+                    print(f"  Failed to archive {dup['id'][:12]}: {exc}")
+
+        # For the surviving Big Brain page, deduplicate child doc pages
+        if bb_pages:
+            bb_id = bb_pages[0]["id"]
+            children = client.get_page_blocks(bb_id)
+            doc_pages = {}
+            for c in children:
+                if c.get("type") == "child_page":
+                    title = c.get("child_page", {}).get("title", "")
+                    if title in doc_pages:
+                        # Duplicate — archive it
+                        try:
+                            client._client.pages.update(page_id=c["id"], archived=True)
+                            removed += 1
+                            print(f"  Archived duplicate doc page: {title} ({c['id'][:12]})")
+                        except Exception as exc:
+                            print(f"  Failed to archive {c['id'][:12]}: {exc}")
+                    else:
+                        doc_pages[title] = c["id"]
+
+            # For each doc page, deduplicate format sub-pages
+            for doc_title, doc_page_id in doc_pages.items():
+                sub_blocks = client.get_page_blocks(doc_page_id)
+                format_pages = {}
+                for sb in sub_blocks:
+                    if sb.get("type") == "child_page":
+                        fmt_title = sb.get("child_page", {}).get("title", "")
+                        if fmt_title in format_pages:
+                            try:
+                                client._client.pages.update(page_id=sb["id"], archived=True)
+                                removed += 1
+                                print(f"  Archived duplicate: {doc_title}/{fmt_title} ({sb['id'][:12]})")
+                            except Exception as exc:
+                                print(f"  Failed to archive {sb['id'][:12]}: {exc}")
+                        else:
+                            format_pages[fmt_title] = sb["id"]
+
+        print(f"\nCleanup complete: {removed} duplicate(s) archived.")
+        return 0
+
     else:
         print(f"Unknown action: {action}")
         return 1
@@ -1318,8 +1596,8 @@ def _add_notion_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     )
     p.add_argument(
         "action",
-        choices=["sync", "import", "export", "status"],
-        help="Notion action: sync (bidirectional), import (pull), export (push), status (check)",
+        choices=["sync", "import", "export", "status", "cleanup"],
+        help="Notion action: sync, import, export, status, cleanup (remove duplicate pages)",
     )
     p.add_argument(
         "--parent-page-id", type=str, default="",
