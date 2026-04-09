@@ -1743,28 +1743,165 @@ def _handle_notion(args: argparse.Namespace) -> int:
 
     elif action == "cleanup":
         from bigbrain.notion.client import NotionClient
+        from bigbrain.notion.exporter import _paragraph, _heading, _callout, _divider
         client = NotionClient.from_config(cfg.notion)
         if not client.is_available():
             print("Notion is not available. Check your token.")
             return 1
 
-        print("Scanning for duplicate pages...")
+        strategy = getattr(args, 'on_duplicate', 'archive')
+        print(f"Scanning for duplicate pages (strategy: {strategy})...")
 
         def _normalize_title(t: str) -> str:
-            """Normalize title for fuzzy dedup: lowercase, collapse editions/ordinals."""
+            """Normalize title for fuzzy dedup."""
             import re
             t = t.lower().strip()
-            # Normalize ordinals: "3rd" → "third", "Third" → "third" etc.
+            t = re.sub(r'[,;:!?\'"()]', ' ', t)
             t = re.sub(r'\b3rd\b', 'third', t)
             t = re.sub(r'\b1st\b', 'first', t)
             t = re.sub(r'\b2nd\b', 'second', t)
-            # Normalize edition abbreviations
-            t = t.replace(' ed.', ' edition').replace(' ed ', ' edition ')
-            # Remove extra whitespace
+            t = re.sub(r'\b4th\b', 'fourth', t)
+            t = re.sub(r'\bed\.?\b', 'edition', t)
+            t = re.sub(r'\bedn\.?\b', 'edition', t)
             t = ' '.join(t.split())
             return t
 
-        # Find all "Big Brain" pages — keep first, archive rest
+        def _extract_block_text(block: dict) -> str:
+            """Extract plain text from a block for comparison."""
+            btype = block.get("type", "")
+            data = block.get(btype, {})
+            rt = data.get("rich_text", [])
+            return "".join(t.get("plain_text", "") for t in rt if isinstance(t, dict)).strip()
+
+        def _dispose_duplicate(page_id: str, title: str) -> bool:
+            """Handle a duplicate page based on the chosen strategy. Returns True if handled."""
+            if strategy == "report":
+                print(f"      [REPORT] Would dispose: '{title}' ({page_id[:12]})")
+                return False
+            elif strategy == "rename":
+                try:
+                    new_title = f"[MERGED] {title}"
+                    client._client.pages.update(
+                        page_id=page_id,
+                        properties={"title": [{"text": {"content": new_title}}]},
+                    )
+                    print(f"      Renamed → '{new_title}'")
+                    return True
+                except Exception as exc:
+                    print(f"      Failed to rename {page_id[:12]}: {exc}")
+                    return False
+            else:  # archive (default)
+                try:
+                    client._client.pages.update(page_id=page_id, archived=True)
+                    print(f"      Archived: '{title}'")
+                    return True
+                except Exception as exc:
+                    print(f"      Failed to archive {page_id[:12]}: {exc}")
+                    return False
+
+        def _merge_pages(keep_id: str, dup_id: str, keep_title: str, dup_title: str) -> tuple[int, int]:
+            """Merge content from dup page into keep page. Returns (merged, conflicts)."""
+            merged_count = 0
+            conflict_count = 0
+
+            # Get child pages from both
+            keep_children = client.get_page_blocks(keep_id)
+            dup_children = client.get_page_blocks(dup_id)
+
+            keep_child_pages = {}  # norm_title → (title, id)
+            for c in keep_children:
+                if c.get("type") == "child_page":
+                    t = c.get("child_page", {}).get("title", "")
+                    keep_child_pages[_normalize_title(t)] = (t, c["id"])
+
+            dup_child_pages = {}
+            for c in dup_children:
+                if c.get("type") == "child_page":
+                    t = c.get("child_page", {}).get("title", "")
+                    dup_child_pages[_normalize_title(t)] = (t, c["id"])
+
+            # Items only in dup → move to keep (re-create under keep)
+            for norm, (title, dup_child_id) in dup_child_pages.items():
+                if norm not in keep_child_pages:
+                    # Unique to dup — copy blocks to a new page under keep
+                    dup_blocks = client.get_page_blocks(dup_child_id)
+                    content_blocks = [b for b in dup_blocks if b.get("type") != "child_page"]
+                    safe_blocks = content_blocks[:100] if content_blocks else [_paragraph("(merged from duplicate)")]
+                    try:
+                        new_page = client.create_page(keep_id, title, children=safe_blocks)
+                        remaining = content_blocks[100:]
+                        while remaining:
+                            client._client.blocks.children.append(block_id=new_page["id"], children=remaining[:100])
+                            remaining = remaining[100:]
+                        merged_count += 1
+                        print(f"      Merged unique page: {title}")
+                    except Exception as exc:
+                        print(f"      Failed to merge {title}: {exc}")
+                else:
+                    # Exists on both sides — check for conflicts
+                    keep_child_id = keep_child_pages[norm][1]
+                    keep_blocks = client.get_page_blocks(keep_child_id)
+                    dup_blocks = client.get_page_blocks(dup_child_id)
+
+                    keep_texts = {_extract_block_text(b) for b in keep_blocks if _extract_block_text(b)}
+                    dup_only_blocks = []
+                    conflict_blocks = []
+
+                    for b in dup_blocks:
+                        bt = _extract_block_text(b)
+                        if not bt:
+                            continue
+                        if bt not in keep_texts:
+                            # Content only in dup — could be unique addition or conflict
+                            dup_only_blocks.append(b)
+
+                    if dup_only_blocks:
+                        # Append unique content from dup with a conflict marker
+                        marker_blocks = [
+                            _divider(),
+                            _callout(
+                                f"\u26a0\ufe0f Merged from duplicate page '{dup_title}/{title}'. "
+                                "Review the content below for conflicts.",
+                                "\u26a0\ufe0f"
+                            ),
+                        ]
+                        # Re-create dup-only blocks as paragraphs (can't move blocks across pages)
+                        for b in dup_only_blocks[:50]:
+                            bt = _extract_block_text(b)
+                            if bt:
+                                marker_blocks.append(_paragraph(bt[:1900]))
+
+                        try:
+                            client._client.blocks.children.append(
+                                block_id=keep_child_id, children=marker_blocks[:100]
+                            )
+                            conflict_count += 1
+                            print(f"      Conflict merged: {title} ({len(dup_only_blocks)} blocks marked)")
+                        except Exception as exc:
+                            print(f"      Failed to merge conflicts for {title}: {exc}")
+
+            # Also merge any non-child-page blocks from the dup root
+            dup_root_blocks = [b for b in dup_children if b.get("type") != "child_page"]
+            keep_root_texts = {_extract_block_text(b) for b in keep_children if _extract_block_text(b)}
+            unique_root = [b for b in dup_root_blocks if _extract_block_text(b) and _extract_block_text(b) not in keep_root_texts]
+
+            if unique_root:
+                merge_root_blocks = [
+                    _callout(f"Content merged from '{dup_title}'", "\U0001f504"),
+                ]
+                for b in unique_root[:30]:
+                    bt = _extract_block_text(b)
+                    if bt:
+                        merge_root_blocks.append(_paragraph(bt[:1900]))
+                try:
+                    client._client.blocks.children.append(block_id=keep_id, children=merge_root_blocks[:100])
+                    merged_count += 1
+                except Exception:
+                    pass
+
+            return merged_count, conflict_count
+
+        # Find all "Big Brain" pages — keep first, merge + archive rest
         bb_pages = []
         all_pages = client.search_pages("Big Brain", page_size=20)
         for p in all_pages:
@@ -1772,56 +1909,111 @@ def _handle_notion(args: argparse.Namespace) -> int:
                 bb_pages.append(p)
 
         removed = 0
+        total_merged = 0
+        total_conflicts = 0
+
         if len(bb_pages) > 1:
             keep = bb_pages[0]
             print(f"  Keeping Big Brain: {keep['id'][:12]}")
             for dup in bb_pages[1:]:
-                try:
-                    client._client.pages.update(page_id=dup["id"], archived=True)
+                m, c = _merge_pages(keep["id"], dup["id"], "Big Brain", "Big Brain (dup)")
+                total_merged += m
+                total_conflicts += c
+                if _dispose_duplicate(dup["id"], "Big Brain (dup)"):
                     removed += 1
-                    print(f"  Archived duplicate Big Brain: {dup['id'][:12]}")
-                except Exception as exc:
-                    print(f"  Failed to archive {dup['id'][:12]}: {exc}")
 
-        # For the surviving Big Brain page, deduplicate child doc pages (fuzzy match)
+        # Deduplicate child doc pages under Big Brain (with merge)
+        # Strategy: keep the page with MORE content, merge unique from the other
         if bb_pages:
             bb_id = bb_pages[0]["id"]
             children = client.get_page_blocks(bb_id)
-            doc_pages = {}  # normalized_title → (original_title, page_id)
+            doc_pages = {}  # norm → (title, page_id)
             for c in children:
                 if c.get("type") == "child_page":
                     title = c.get("child_page", {}).get("title", "")
                     norm = _normalize_title(title)
                     if norm in doc_pages:
-                        try:
-                            client._client.pages.update(page_id=c["id"], archived=True)
+                        existing_title, existing_id = doc_pages[norm]
+                        new_title, new_id = title, c["id"]
+
+                        # Count content in each to decide which to keep
+                        existing_blocks = client.get_page_blocks(existing_id)
+                        new_blocks = client.get_page_blocks(new_id)
+                        existing_count = len(existing_blocks)
+                        new_count = len(new_blocks)
+
+                        if new_count > existing_count:
+                            # New page has more content — swap: keep new, merge from existing
+                            keep_title, keep_id = new_title, new_id
+                            dup_title, dup_id = existing_title, existing_id
+                            doc_pages[norm] = (keep_title, keep_id)
+                        else:
+                            keep_title, keep_id = existing_title, existing_id
+                            dup_title, dup_id = new_title, new_id
+
+                        smaller_count = min(existing_count, new_count)
+                        bigger_count = max(existing_count, new_count)
+                        print(f"  Duplicate: '{dup_title}' ({smaller_count} blocks) vs '{keep_title}' ({bigger_count} blocks)")
+                        print(f"    Keeping '{keep_title}' (more content), merging unique from '{dup_title}'")
+
+                        m, conf = _merge_pages(keep_id, dup_id, keep_title, dup_title)
+                        total_merged += m
+                        total_conflicts += conf
+                        if _dispose_duplicate(dup_id, dup_title):
                             removed += 1
-                            kept_title = doc_pages[norm][0]
-                            print(f"  Archived duplicate: '{title}' (keeping '{kept_title}')")
-                        except Exception as exc:
-                            print(f"  Failed to archive {c['id'][:12]}: {exc}")
                     else:
                         doc_pages[norm] = (title, c["id"])
 
-            # For each doc page, deduplicate format sub-pages (exact + fuzzy)
+            # Deduplicate format sub-pages (within each doc page)
             for norm_title, (doc_title, doc_page_id) in doc_pages.items():
                 sub_blocks = client.get_page_blocks(doc_page_id)
-                format_pages = {}  # normalized → (title, id)
+                format_pages = {}
                 for sb in sub_blocks:
                     if sb.get("type") == "child_page":
                         fmt_title = sb.get("child_page", {}).get("title", "")
                         fmt_norm = _normalize_title(fmt_title)
                         if fmt_norm in format_pages:
-                            try:
-                                client._client.pages.update(page_id=sb["id"], archived=True)
+                            existing_fmt, existing_fmt_id = format_pages[fmt_norm]
+
+                            # Keep the one with more content
+                            existing_fmt_blocks = client.get_page_blocks(existing_fmt_id)
+                            new_fmt_blocks = client.get_page_blocks(sb["id"])
+
+                            if len(new_fmt_blocks) > len(existing_fmt_blocks):
+                                keep_fmt_id, dup_fmt_id = sb["id"], existing_fmt_id
+                                keep_fmt_blocks, dup_fmt_blocks = new_fmt_blocks, existing_fmt_blocks
+                                format_pages[fmt_norm] = (fmt_title, sb["id"])
+                            else:
+                                keep_fmt_id, dup_fmt_id = existing_fmt_id, sb["id"]
+                                keep_fmt_blocks, dup_fmt_blocks = existing_fmt_blocks, new_fmt_blocks
+
+                            # Merge unique content from the smaller one
+                            keep_texts = {_extract_block_text(b) for b in keep_fmt_blocks if _extract_block_text(b)}
+                            unique_blocks = [b for b in dup_fmt_blocks if _extract_block_text(b) and _extract_block_text(b) not in keep_texts]
+
+                            if unique_blocks:
+                                merge_blocks = [_callout(f"\u26a0\ufe0f Merged from duplicate — review below", "\u26a0\ufe0f")]
+                                for b in unique_blocks[:50]:
+                                    bt = _extract_block_text(b)
+                                    if bt:
+                                        merge_blocks.append(_paragraph(bt[:1900]))
+                                try:
+                                    client._client.blocks.children.append(block_id=keep_fmt_id, children=merge_blocks[:100])
+                                    total_conflicts += 1
+                                except Exception:
+                                    pass
+
+                            if _dispose_duplicate(dup_fmt_id, fmt_title):
                                 removed += 1
-                                print(f"  Archived duplicate: {doc_title}/{fmt_title}")
-                            except Exception as exc:
-                                print(f"  Failed to archive {sb['id'][:12]}: {exc}")
                         else:
                             format_pages[fmt_norm] = (fmt_title, sb["id"])
 
-        print(f"\nCleanup complete: {removed} duplicate(s) archived.")
+        action_word = {"archive": "Archived", "rename": "Renamed", "report": "Found"}.get(strategy, "Handled")
+        print(f"\nCleanup complete ({strategy} mode):")
+        print(f"  {action_word}: {removed} duplicate(s)")
+        print(f"  Merged:   {total_merged} unique page(s)")
+        if total_conflicts:
+            print(f"  Conflicts: {total_conflicts} (marked with \u26a0\ufe0f callouts \u2014 review in Notion)")
         return 0
 
     else:
@@ -1856,6 +2048,12 @@ def _add_notion_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     p.add_argument(
         "--limit", type=int, default=20,
         help="Max pages to import (default: 20)",
+    )
+    p.add_argument(
+        "--on-duplicate",
+        choices=["archive", "rename", "report"],
+        default="archive",
+        help="Cleanup strategy for duplicates: archive (trash), rename (prefix with [MERGED]), report (list only)",
     )
     p.set_defaults(func=_handle_notion)
     return p
