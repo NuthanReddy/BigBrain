@@ -1,14 +1,20 @@
-"""Digest generator — produces rich chapter-by-chapter study notes from KB data.
+"""Unified digest pipeline — one AI call, multiple output targets.
 
-Reads chunks (sections) from the knowledge base, sends each to an AI provider
-with the full source text, and writes comprehensive markdown summaries to the
-``digest/`` directory.  Output quality matches hand-written study notes with
-key concepts, algorithms, complexity analysis, theorems, and examples.
+Generates rich study-note-quality content from KB chunks, then renders
+to the requested target format:
+
+- ``markdown`` (default) — detailed study notes per section
+- ``flashcard`` — Q/A flashcards for spaced repetition
+- ``cheatsheet`` — condensed reference sheet
+- ``qa`` — self-test question & answer pairs
+- ``wiki`` — writes to wiki/ directory for MkDocs serving
+- ``notion`` — creates Notion pages under a parent page
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +25,8 @@ from bigbrain.logging_config import get_logger
 from bigbrain.providers.registry import ProviderRegistry
 
 logger = get_logger(__name__)
+
+VALID_TARGETS = ("markdown", "flashcard", "cheatsheet", "qa", "wiki", "notion")
 
 _DIGEST_SYSTEM = (
     "You are an expert technical writer creating comprehensive study notes. "
@@ -60,6 +68,33 @@ Write a detailed Markdown summary with key concepts, definitions, and important 
 
 Summary:'''
 
+# Reformat prompts — take existing digest markdown and reformat
+_FLASHCARD_PROMPT = '''Convert these study notes into flashcard Q&A pairs.
+Return as Markdown with ## Q: and **A:** format. Create 10-20 cards covering the most important concepts.
+
+Study notes:
+{content}
+
+Flashcards:'''
+
+_CHEATSHEET_PROMPT = '''Condense these study notes into a one-page cheatsheet.
+Use compact formatting: tables, bullet points, code snippets. No prose paragraphs.
+Focus on formulas, complexity, key properties, and quick-reference facts.
+
+Study notes:
+{content}
+
+Cheatsheet:'''
+
+_QA_PROMPT = '''Generate self-test questions from these study notes.
+Each question should test understanding, not just recall. Include both conceptual and problem-solving questions.
+Format: ## Q: question\\n**A:** detailed answer
+
+Study notes:
+{content}
+
+Questions:'''
+
 
 def _slugify(text: str) -> str:
     """Convert a title to a filesystem-safe slug."""
@@ -70,8 +105,18 @@ def _slugify(text: str) -> str:
     return text.strip("-")[:80]
 
 
+@dataclass
+class DigestResult:
+    """Result of a digest build."""
+    written: int = 0
+    skipped: int = 0
+    errors: list[str] = field(default_factory=list)
+    output_dir: str = ""
+    digest_files: list[str] = field(default_factory=list)
+
+
 class DigestBuilder:
-    """Generates digest markdown files from KB chunks."""
+    """Unified digest pipeline: KB chunks → AI → multiple output targets."""
 
     def __init__(
         self,
@@ -104,158 +149,253 @@ class DigestBuilder:
         self,
         doc_id: str,
         *,
+        target: str = "markdown",
         model: str = "",
         force: bool = False,
+        notion_parent_id: str = "",
     ) -> DigestResult:
         """Generate digest for a document.
 
-        Creates one markdown file per chunk (section/chapter) under
-        ``digest/<doc-title>/<section-slug>.md``.
+        1. Generate markdown study notes (one per chunk) — cached in digest/<doc>/
+        2. If target != markdown, reformat each file to the requested format
+        3. If target is wiki/notion, copy/push to destination
         """
         doc = self._store.get_document(doc_id)
         if doc is None:
             logger.warning("Document not found: %s", doc_id)
             return DigestResult(errors=[f"Document not found: {doc_id}"])
 
-        chunks = self._store.get_chunks(doc_id)
-        if not chunks:
-            # Fall back to document sections
-            logger.info("No chunks found, using document sections directly")
-            return self._build_from_sections(doc, model=model, force=force)
+        # Step 1: Generate base markdown digest (the expensive AI call)
+        base_result = self._generate_base_digest(doc, model=model, force=force)
 
-        return self._build_from_chunks(doc, chunks, model=model, force=force)
+        if target == "markdown":
+            return base_result
 
-    def _build_from_chunks(
-        self, doc: Document, chunks: list, *, model: str = "", force: bool = False,
-    ) -> DigestResult:
-        """Generate digest from KB chunks."""
-        result = DigestResult()
-        doc_slug = _slugify(doc.title)
-        out_dir = self._output_dir / doc_slug
-        out_dir.mkdir(parents=True, exist_ok=True)
+        # Step 2: Reformat or route to target
+        if target in ("flashcard", "cheatsheet", "qa"):
+            return self._reformat(doc, base_result, target=target, model=model, force=force)
+        elif target == "wiki":
+            return self._to_wiki(doc, base_result)
+        elif target == "notion":
+            return self._to_notion(doc, base_result, parent_id=notion_parent_id)
 
-        for chunk in chunks:
-            title = chunk.section_title or f"Section {chunk.chunk_index + 1}"
-            slug = _slugify(title)
-            if not slug:
-                slug = f"section-{chunk.chunk_index + 1:02d}"
-            out_path = out_dir / f"{slug}.md"
+        base_result.errors.append(f"Unknown target: {target}")
+        return base_result
 
-            if out_path.exists() and not force:
-                logger.debug("Skipping existing: %s", out_path)
-                result.skipped += 1
-                continue
-
-            content = chunk.content or ""
-            if not content.strip():
-                result.skipped += 1
-                continue
-
-            # Choose prompt based on content length
-            if len(content) > 500:
-                prompt = _DIGEST_TEMPLATE.format(
-                    doc_title=doc.title,
-                    section_title=title,
-                    content=content[:12000],
-                )
-            else:
-                prompt = _DIGEST_TEMPLATE_SHORT.format(
-                    doc_title=doc.title,
-                    section_title=title,
-                    content=content,
-                )
-
-            try:
-                resp = self._registry.chat(
-                    [
-                        {"role": "system", "content": _DIGEST_SYSTEM},
-                        {"role": "user", "content": prompt},
-                    ],
-                    model=model,
-                    max_tokens=4000,
-                )
-                markdown = f"# {title}\n\n{resp.text.strip()}\n"
-                out_path.write_text(markdown, encoding="utf-8")
-                result.written += 1
-                logger.info("Wrote digest: %s", out_path)
-            except Exception as exc:
-                result.errors.append(f"{title}: {exc}")
-                logger.warning("Digest failed for '%s': %s", title, exc)
-
-        result.output_dir = str(out_dir)
-        return result
-
-    def _build_from_sections(
+    def _generate_base_digest(
         self, doc: Document, *, model: str = "", force: bool = False,
     ) -> DigestResult:
-        """Generate digest directly from document sections (no chunks in KB)."""
+        """Generate base markdown study notes per chunk. Cached on disk."""
         result = DigestResult()
         doc_slug = _slugify(doc.title)
         out_dir = self._output_dir / doc_slug
         out_dir.mkdir(parents=True, exist_ok=True)
+        result.output_dir = str(out_dir)
 
-        sections = doc.sections or []
-        if not sections:
-            result.errors.append("No sections or chunks available")
+        # Get chunks or fall back to sections
+        chunks = self._store.get_chunks(doc.id)
+        items: list[tuple[str, str]] = []  # (title, content)
+
+        if chunks:
+            for c in chunks:
+                title = c.section_title or f"Section {c.chunk_index + 1}"
+                items.append((title, c.content or ""))
+        elif doc.sections:
+            for i, sec in enumerate(doc.sections):
+                title = sec.title or f"Section {i + 1}"
+                items.append((title, sec.content or ""))
+        else:
+            result.errors.append("No chunks or sections available")
             return result
 
-        for i, sec in enumerate(sections):
-            title = sec.title or f"Section {i + 1}"
-            content = sec.content or ""
+        for title, content in items:
             if not content.strip():
                 result.skipped += 1
                 continue
 
-            slug = _slugify(title)
-            if not slug:
-                slug = f"section-{i + 1:02d}"
+            slug = _slugify(title) or f"section-{result.written + result.skipped + 1:02d}"
             out_path = out_dir / f"{slug}.md"
 
             if out_path.exists() and not force:
+                logger.debug("Using cached: %s", out_path)
                 result.skipped += 1
+                result.digest_files.append(str(out_path))
                 continue
 
-            if len(content) > 500:
-                prompt = _DIGEST_TEMPLATE.format(
-                    doc_title=doc.title,
-                    section_title=title,
-                    content=content[:12000],
-                )
-            else:
-                prompt = _DIGEST_TEMPLATE_SHORT.format(
-                    doc_title=doc.title,
-                    section_title=title,
-                    content=content,
-                )
+            prompt = (
+                _DIGEST_TEMPLATE if len(content) > 500 else _DIGEST_TEMPLATE_SHORT
+            ).format(doc_title=doc.title, section_title=title, content=content[:12000])
 
             try:
                 resp = self._registry.chat(
-                    [
-                        {"role": "system", "content": _DIGEST_SYSTEM},
-                        {"role": "user", "content": prompt},
-                    ],
-                    model=model,
-                    max_tokens=4000,
+                    [{"role": "system", "content": _DIGEST_SYSTEM},
+                     {"role": "user", "content": prompt}],
+                    model=model, max_tokens=4000,
                 )
                 markdown = f"# {title}\n\n{resp.text.strip()}\n"
                 out_path.write_text(markdown, encoding="utf-8")
                 result.written += 1
-                logger.info("Wrote digest: %s", out_path)
+                result.digest_files.append(str(out_path))
+                logger.info("Wrote: %s", out_path)
             except Exception as exc:
                 result.errors.append(f"{title}: {exc}")
-                logger.warning("Digest failed for '%s': %s", title, exc)
+                logger.warning("Failed for '%s': %s", title, exc)
 
-        result.output_dir = str(out_dir)
         return result
 
+    def _reformat(
+        self, doc: Document, base_result: DigestResult,
+        target: str, model: str = "", force: bool = False,
+    ) -> DigestResult:
+        """Reformat existing digest markdown into flashcard/cheatsheet/qa."""
+        result = DigestResult()
+        doc_slug = _slugify(doc.title)
+        out_dir = self._output_dir / doc_slug
+        result.output_dir = str(out_dir)
 
-from dataclasses import dataclass, field
+        prompts = {"flashcard": _FLASHCARD_PROMPT, "cheatsheet": _CHEATSHEET_PROMPT, "qa": _QA_PROMPT}
+        reformat_prompt = prompts.get(target, _FLASHCARD_PROMPT)
 
+        # Collect all digest files
+        all_files = base_result.digest_files
+        if not all_files:
+            all_files = sorted(str(p) for p in out_dir.glob("*.md") if p.stem != target)
 
-@dataclass
-class DigestResult:
-    """Result of a digest build."""
-    written: int = 0
-    skipped: int = 0
-    errors: list[str] = field(default_factory=list)
-    output_dir: str = ""
+        for filepath in all_files:
+            path = Path(filepath)
+            if not path.exists():
+                continue
+
+            out_path = out_dir / f"{path.stem}-{target}.md"
+            if out_path.exists() and not force:
+                result.skipped += 1
+                continue
+
+            content = path.read_text(encoding="utf-8")
+            prompt = reformat_prompt.format(content=content[:10000])
+
+            try:
+                resp = self._registry.chat(
+                    [{"role": "system", "content": _DIGEST_SYSTEM},
+                     {"role": "user", "content": prompt}],
+                    model=model, max_tokens=4000,
+                )
+                out_path.write_text(f"# {path.stem} — {target.title()}\n\n{resp.text.strip()}\n", encoding="utf-8")
+                result.written += 1
+                logger.info("Wrote %s: %s", target, out_path)
+            except Exception as exc:
+                result.errors.append(f"{path.stem}: {exc}")
+
+        return result
+
+    def _to_wiki(self, doc: Document, base_result: DigestResult) -> DigestResult:
+        """Copy digest files to wiki/ directory."""
+        result = DigestResult()
+        wiki_dir = Path("wiki")
+        wiki_dir.mkdir(parents=True, exist_ok=True)
+        doc_slug = _slugify(doc.title)
+
+        all_files = base_result.digest_files
+        if not all_files:
+            out_dir = self._output_dir / doc_slug
+            all_files = sorted(str(p) for p in out_dir.glob("*.md"))
+
+        for filepath in all_files:
+            path = Path(filepath)
+            if not path.exists():
+                continue
+            dest = wiki_dir / f"{doc_slug}-{path.name}"
+            content = path.read_text(encoding="utf-8")
+            dest.write_text(content, encoding="utf-8")
+            result.written += 1
+
+        # Create/update index
+        index = wiki_dir / "index.md"
+        if not index.exists():
+            links = [f"- [{Path(f).stem}]({doc_slug}-{Path(f).name})" for f in all_files]
+            index.write_text(
+                f"# BigBrain Wiki\n\n## {doc.title}\n\n" + "\n".join(links) + "\n",
+                encoding="utf-8",
+            )
+
+        result.output_dir = str(wiki_dir)
+        logger.info("Copied %d digest files to wiki/", result.written)
+        return result
+
+    def _to_notion(
+        self, doc: Document, base_result: DigestResult, parent_id: str = "",
+    ) -> DigestResult:
+        """Push digest files as Notion child pages."""
+        result = DigestResult()
+
+        if not parent_id:
+            result.errors.append("--notion-parent required for --to notion")
+            return result
+
+        try:
+            from bigbrain.notion.client import NotionClient
+            from bigbrain.notion.exporter import _paragraph, _heading, _divider
+            from bigbrain.config import load_config
+            cfg = load_config()
+            client = NotionClient.from_config(cfg.notion)
+        except Exception as exc:
+            result.errors.append(f"Notion client error: {exc}")
+            return result
+
+        doc_slug = _slugify(doc.title)
+        all_files = base_result.digest_files
+        if not all_files:
+            out_dir = self._output_dir / doc_slug
+            all_files = sorted(str(p) for p in out_dir.glob("*.md"))
+
+        # BigBrain marker block
+        marker = {
+            "object": "block",
+            "type": "callout",
+            "callout": {
+                "icon": {"type": "emoji", "emoji": "🧠"},
+                "rich_text": [{"type": "text", "text": {"content": "Generated by BigBrain — auto-imported pages will skip this page."}}],
+                "color": "gray_background",
+            },
+        }
+
+        for filepath in all_files:
+            path = Path(filepath)
+            if not path.exists():
+                continue
+
+            content = path.read_text(encoding="utf-8")
+            title = content.split("\n")[0].lstrip("# ").strip() or path.stem
+
+            # Convert markdown to Notion blocks (simplified)
+            blocks = [marker]
+            for line in content.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith("# "):
+                    continue  # skip title (it's the page title)
+                elif line.startswith("## "):
+                    blocks.append(_heading(line[3:], level=2))
+                elif line.startswith("### "):
+                    blocks.append(_heading(line[4:], level=3))
+                else:
+                    for chunk in [line[i:i+1900] for i in range(0, len(line), 1900)]:
+                        blocks.append(_paragraph(chunk))
+
+            try:
+                first = blocks[:100]
+                rest = blocks[100:]
+                page = client.create_page(parent_id, title, children=first)
+                page_id = page["id"]
+                while rest:
+                    batch = rest[:100]
+                    rest = rest[100:]
+                    client._client.blocks.children.append(block_id=page_id, children=batch)
+                result.written += 1
+                logger.info("Created Notion page: %s", title)
+            except Exception as exc:
+                result.errors.append(f"{title}: {exc}")
+
+        result.output_dir = "notion"
+        return result

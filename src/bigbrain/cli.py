@@ -1415,7 +1415,7 @@ def _add_compile_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
 
 
 def _handle_digest(args: argparse.Namespace) -> int:
-    """Generate rich chapter-by-chapter study notes from KB data."""
+    """Generate rich study notes with multiple output targets."""
     from bigbrain.config import load_config
     from pathlib import Path
 
@@ -1442,15 +1442,30 @@ def _handle_digest(args: argparse.Namespace) -> int:
 
     model = args.model or ""
     force = args.force
+    target = getattr(args, 'to', 'markdown') or 'markdown'
     output = args.output or "digest"
+    notion_parent = getattr(args, 'notion_parent', '') or ''
 
-    print(f"Generating digest for {doc_id}...")
+    # Resolve Notion parent if needed
+    if target == "notion":
+        if not notion_parent:
+            print("Error: --notion-parent required for --to notion")
+            return 1
+        notion_parent = _resolve_notion_page_id(notion_parent, cfg)
+        if not notion_parent:
+            return 1
+
+    target_info = f" → {target}" if target != "markdown" else ""
+    print(f"Generating digest for {doc_id}{target_info}...")
     if model:
         print(f"  Model: {model}")
 
     with DigestBuilder.from_config(cfg) as builder:
         builder._output_dir = Path(output)
-        result = builder.build(doc_id, model=model, force=force)
+        result = builder.build(
+            doc_id, target=target, model=model, force=force,
+            notion_parent_id=notion_parent,
+        )
 
     print()
     print(f"Digest complete:")
@@ -1471,14 +1486,18 @@ def _add_digest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         "digest",
         help="Generate rich study notes per chapter/section",
         description=(
-            "Generate comprehensive chapter-by-chapter study notes from "
-            "KB data. Each chunk/section becomes a detailed markdown file "
-            "in digest/<doc-title>/."
+            "Generate comprehensive study notes from KB data. "
+            "One AI call generates markdown, then --to routes to different outputs."
         ),
     )
     p.add_argument(
         "--doc-id", type=str, required=True,
         help="Document ID to generate digest for (use prefix)",
+    )
+    p.add_argument(
+        "--to", type=str, default="markdown",
+        choices=["markdown", "flashcard", "cheatsheet", "qa", "wiki", "notion"],
+        help="Output target (default: markdown study notes)",
     )
     p.add_argument(
         "--model", type=str, default="",
@@ -1491,6 +1510,10 @@ def _add_digest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     p.add_argument(
         "--output", "-o", type=str, default="digest",
         help="Output directory (default: digest/)",
+    )
+    p.add_argument(
+        "--notion-parent", type=str, default="",
+        help="Notion parent page name or UUID (required for --to notion)",
     )
     p.set_defaults(func=_handle_digest)
     return p
