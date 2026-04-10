@@ -200,7 +200,7 @@ def _handle_distill(args: argparse.Namespace) -> int:
             if args.doc_id:
                 doc_id = args.doc_id
                 # Resolve prefix to full ID
-                full_id = pipeline.store.resolve_doc_id(doc_id) if not pipeline.store.get_document(doc_id) else doc_id
+                full_id = pipeline._store.resolve_doc_id(doc_id) if not pipeline._store.get_document(doc_id) else doc_id
                 if full_id:
                     doc_id = full_id
                 print(f"Distilling document: {doc_id}{f' (step: {step_arg})' if step_arg else ''}")
@@ -304,7 +304,7 @@ def _handle_compile(args: argparse.Namespace) -> int:
         with CompilePipeline.from_config(cfg) as pipeline:
             if args.doc_id:
                 doc_id = args.doc_id
-                full_id = _resolve_doc_id(pipeline.store, doc_id)
+                full_id = _resolve_doc_id(pipeline._store, doc_id)
                 if full_id:
                     doc_id = full_id
                 print(f"Compiling {doc_id} as {fmt}...")
