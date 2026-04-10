@@ -9,43 +9,71 @@ from bigbrain.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def chunk_by_section(doc: Document, *, min_length: int = 50) -> list[Chunk]:
-    """Chunk by document sections. Each section becomes a chunk.
-    Sections shorter than min_length are merged with the next section.
-    Falls back to by_paragraph if no sections."""
+def chunk_by_section(
+    doc: Document, *, min_length: int = 50, max_chunk_size: int = 0,
+) -> list[Chunk]:
+    """Chunk by document sections, merging small ones together.
+
+    When *max_chunk_size* > 0, consecutive sections are merged into a single
+    chunk until adding the next section would exceed the limit.  This ensures
+    all sections are covered (no silent truncation) while keeping chunk count
+    manageable for large documents.
+
+    Falls back to by_paragraph if no sections.
+    """
     if not doc.sections:
         return chunk_by_paragraph(doc, min_length=min_length)
 
     chunks: list[Chunk] = []
     buffer = ""
     buffer_title = ""
+
+    def _flush() -> None:
+        nonlocal buffer, buffer_title
+        if buffer.strip():
+            chunks.append(Chunk(
+                document_id=doc.id,
+                content=buffer.strip(),
+                section_title=buffer_title,
+                chunk_index=len(chunks),
+            ))
+        buffer = ""
+        buffer_title = ""
+
     for i, sec in enumerate(doc.sections):
         text = sec.content.strip()
         if not text:
             continue
-        if len(text) < min_length and i < len(doc.sections) - 1:
-            buffer += f"\n\n{text}" if buffer else text
-            buffer_title = buffer_title or sec.title
-            continue
 
-        content = f"{buffer}\n\n{text}".strip() if buffer else text
-        title = buffer_title or sec.title
-        chunks.append(Chunk(
-            document_id=doc.id,
-            content=content,
-            section_title=title,
-            chunk_index=len(chunks),
-        ))
-        buffer = ""
-        buffer_title = ""
+        # If max_chunk_size is set, merge sections up to the limit
+        if max_chunk_size > 0:
+            candidate = f"{buffer}\n\n{text}".strip() if buffer else text
+            if len(candidate) > max_chunk_size and buffer:
+                _flush()
+                buffer = text
+                buffer_title = sec.title
+            else:
+                buffer = candidate
+                buffer_title = buffer_title or sec.title
+        else:
+            # Original behavior: only merge sections shorter than min_length
+            if len(text) < min_length and i < len(doc.sections) - 1:
+                buffer += f"\n\n{text}" if buffer else text
+                buffer_title = buffer_title or sec.title
+                continue
 
-    if buffer:
-        chunks.append(Chunk(
-            document_id=doc.id,
-            content=buffer,
-            section_title=buffer_title,
-            chunk_index=len(chunks),
-        ))
+            content = f"{buffer}\n\n{text}".strip() if buffer else text
+            title = buffer_title or sec.title
+            chunks.append(Chunk(
+                document_id=doc.id,
+                content=content,
+                section_title=title,
+                chunk_index=len(chunks),
+            ))
+            buffer = ""
+            buffer_title = ""
+
+    _flush()
     return chunks
 
 
@@ -115,16 +143,25 @@ def chunk_document(
     min_length: int = 50,
     max_chunks: int = 50,
 ) -> list[Chunk]:
-    """Main entry point — dispatch to the appropriate strategy."""
+    """Main entry point — dispatch to the appropriate strategy.
+
+    When ``strategy="by_section"`` and ``chunk_size > 0``, consecutive
+    sections are merged until the combined size reaches ``chunk_size``.
+    This keeps the author's logical structure while limiting chunk count.
+    """
     if strategy == "by_section":
-        chunks = chunk_by_section(doc, min_length=min_length)
+        chunks = chunk_by_section(
+            doc, min_length=min_length, max_chunk_size=chunk_size,
+        )
     elif strategy == "sliding_window":
         chunks = chunk_sliding_window(doc, chunk_size=chunk_size, overlap=overlap)
     elif strategy == "by_paragraph":
         chunks = chunk_by_paragraph(doc, min_length=min_length)
     else:
         logger.warning("Unknown chunk strategy '%s', using by_section", strategy)
-        chunks = chunk_by_section(doc, min_length=min_length)
+        chunks = chunk_by_section(
+            doc, min_length=min_length, max_chunk_size=chunk_size,
+        )
 
     if len(chunks) > max_chunks:
         logger.warning(

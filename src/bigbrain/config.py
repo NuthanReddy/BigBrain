@@ -63,12 +63,12 @@ class KBConfig:
 class DistillConfig:
     """Configuration for the distillation pipeline."""
     chunk_strategy: str = "by_section"  # "by_section", "sliding_window", "by_paragraph"
-    chunk_size: int = 1000  # max characters per chunk (for sliding_window)
-    chunk_overlap: int = 200  # overlap between chunks (for sliding_window)
+    chunk_size: int = 5000  # target chars per chunk (merges sections up to this limit)
+    chunk_overlap: int = 200  # overlap between chunks (for sliding_window only)
     summary_max_length: int = 500  # max words for summaries
     entity_extraction: bool = True
     relationship_extraction: bool = True
-    max_chunks_per_doc: int = 50  # safety limit
+    max_chunks_per_doc: int = 100  # safety limit (after merging)
 
 
 @dataclass

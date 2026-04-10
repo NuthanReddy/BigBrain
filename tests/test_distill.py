@@ -267,9 +267,12 @@ class TestChunker:
 
     def test_chunk_document_dispatch(self):
         doc = _make_doc()
-        # by_section
-        c1 = chunk_document(doc, strategy="by_section")
+        # by_section with merging disabled
+        c1 = chunk_document(doc, strategy="by_section", chunk_size=0)
         assert len(c1) == 2
+        # by_section with merging (default chunk_size merges small sections)
+        c1m = chunk_document(doc, strategy="by_section", chunk_size=5000)
+        assert len(c1m) >= 1
         # sliding_window
         c2 = chunk_document(doc, strategy="sliding_window", chunk_size=60, overlap=10)
         assert len(c2) >= 2
@@ -561,12 +564,12 @@ class TestDistillConfig:
     def test_default_values(self):
         cfg = DistillConfig()
         assert cfg.chunk_strategy == "by_section"
-        assert cfg.chunk_size == 1000
+        assert cfg.chunk_size == 5000
         assert cfg.chunk_overlap == 200
         assert cfg.summary_max_length == 500
         assert cfg.entity_extraction is True
         assert cfg.relationship_extraction is True
-        assert cfg.max_chunks_per_doc == 50
+        assert cfg.max_chunks_per_doc == 100
 
     def test_config_in_bigbrain_config(self):
         cfg = BigBrainConfig()
