@@ -1,64 +1,183 @@
 # I Foundations
 
-I
-Foundations
+# Study Notes: Part I - Foundations (Introduction to Algorithms, Third Edition)
 
-Introduction
-This part will start you thinking about designing and analyzing algorithms. It is
-intended to be a gentle introduction to how we specify algorithms, some of the
-design strategies we will use throughout this book, and many of the fundamental
-ideas used in algorithm analysis. Later parts of this book will build upon this base.
-Chapter 1 provides an overview of algorithms and their place in modern com-
-puting systems. This chapter deﬁnes what an algorithm is and lists some examples.
-It also makes a case that we should consider algorithms as a technology, along-
-side technologies such as fast hardware, graphical user interfaces, object-oriented
-systems, and networks.
-In Chapter 2, we see our ﬁrst algorithms, which solve the problem of sorting
-a sequence of n numbers. They are written in a pseudocode which, although not
-directly translatable to any conventional programming language, conveys the struc-
-ture of the algorithm clearly enough that you should be able to implement it in the
-language of your choice. The sorting algorithms we examine are insertion sort,
-which uses an incremental approach, and merge sort, which uses a recursive tech-
-nique known as “divide-and-conquer.” Although the time each requires increases
-with the value of n, the rate of increase differs between the two algorithms. We
-determine these running times in Chapter 2, and we develop a useful notation to
-express them.
-Chapter 3 precisely deﬁnes this notation, which we call asymptotic notation. It
-starts by deﬁning several asymptotic notations, which we use for bounding algo-
-rithm running times from above and/or below. The rest of Chapter 3 is primarily
-a presentation of mathematical notation, more to ensure that your use of notation
-matches that in this book than to teach you new mathematical concepts.
+## Overview
+Part I of *Introduction to Algorithms, Third Edition* introduces the fundamental concepts that underpin the design and analysis of algorithms. It covers basic definitions, techniques, and tools that are critical for understanding algorithms, their performance, and their correctness. Topics include sorting algorithms, divide-and-conquer, asymptotic notation, recurrences, and probabilistic analysis. These concepts form the foundation for more complex algorithms covered in later sections of the book.
 
-4
-Part I
-Foundations
-Chapter 4 delves further into the divide-and-conquer method introduced in
-Chapter 2. It provides additional examples of divide-and-conquer algorithms, in-
-cluding Strassen’s surprising method for multiplying two square matrices. Chap-
-ter 4 contains methods for solving recurrences, which are useful for describing
-the running times of recursive algorithms. One powerful technique is the “mas-
-ter method,” which we often use to solve recurrences that arise from divide-and-
-conquer algorithms. Although much of Chapter 4 is devoted to proving the cor-
-rectness of the master method, you may skip this proof yet still employ the master
-method.
-Chapter 5 introduces probabilistic analysis and randomized algorithms. We typ-
-ically use probabilistic analysis to determine the running time of an algorithm in
-cases in which, due to the presence of an inherent probability distribution, the
-running time may differ on different inputs of the same size. In some cases, we
-assume that the inputs conform to a known probability distribution, so that we are
-averaging the running time over all possible inputs. In other cases, the probability
-distribution comes not from the inputs but from random choices made during the
-course of the algorithm. An algorithm whose behavior is determined not only by its
-input but by the values produced by a random-number generator is a randomized
-algorithm. We can use randomized algorithms to enforce a probability distribution
-on the inputs—thereby ensuring that no particular input always causes poor perfor-
-mance—or even to bound the error rate of algorithms that are allowed to produce
-incorrect results on a limited basis.
-Appendices A–D contain other mathematical material that you will ﬁnd helpful
-as you read this book. You are likely to have seen much of the material in the
-appendix chapters before having read this book (although the speciﬁc deﬁnitions
-and notational conventions we use may differ in some cases from what you have
-seen in the past), and so you should think of the Appendices as reference material.
-On the other hand, you probably have not already seen most of the material in
-Part I. All the chapters in Part I and the Appendices are written with a tutorial
-ﬂavor.
+---
+
+## Key Concepts
+
+- **What is an Algorithm?**
+  - A step-by-step computational procedure that takes input and produces output.
+  - Algorithms solve specific computational problems and are central to computer science.
+
+- **Algorithms as Technology:**
+  - Algorithms are as important as hardware or software systems.
+  - Efficient algorithms save resources, enabling practical solutions otherwise infeasible with brute force.
+
+- **Sorting Algorithms:**
+  - Sorting is a foundational problem in computer science.
+  - Two major techniques:
+    - **Incremental approach** (Insertion Sort).
+    - **Divide-and-conquer approach** (Merge Sort).
+  - Sorting serves as an entry point for analyzing algorithm efficiency.
+
+- **Asymptotic Notation:**
+  - Used to formally describe the performance of algorithms as input size grows.
+  - Big-O, Omega, and Theta notations are introduced to bound running times from above, below, or both.
+
+- **Divide-and-Conquer:**
+  - A common algorithm design paradigm.
+  - Break a problem into smaller subproblems, solve them recursively, and combine their solutions.
+  - Illustrated using examples like **Merge Sort** and **Strassen’s Matrix Multiplication**.
+
+- **Recurrences:**
+  - Mathematical expressions that describe the running time of recursive algorithms.
+  - Solved via techniques like the **Master Theorem**, substitution, and recursion trees.
+
+- **Probabilistic Analysis:**
+  - Analyzing the expected running time or performance of an algorithm when input or algorithm behavior involves randomness.
+
+- **Randomized Algorithms:**
+  - Algorithms that make random choices during execution.
+  - Useful for reducing worst-case performance or achieving probabilistic guarantees.
+
+---
+
+## Algorithms and Techniques
+
+### Insertion Sort
+#### How It Works
+- Incrementally builds a sorted subsection of the array by repeatedly inserting new elements into their correct positions.
+- Uses a comparison-based approach.
+
+#### Pseudocode Sketch
+```text
+for i = 2 to n:
+    key = A[i]
+    j = i - 1
+    while j > 0 and A[j] > key:
+        A[j + 1] = A[j]
+        j = j - 1
+    A[j + 1] = key
+```
+
+#### Time/Space Complexity
+- Best Case: \( O(n) \) (already sorted input).
+- Average Case: \( O(n^2) \).
+- Worst Case: \( O(n^2) \) (reverse-sorted input).
+- Space Complexity: \( O(1) \) (in-place sorting).
+
+---
+
+### Merge Sort
+#### How It Works
+- Divides the array into two halves, recursively sorts each half, and then merges them into a fully sorted array.
+- Uses the divide-and-conquer paradigm.
+
+#### Pseudocode Sketch
+```text
+MERGE-SORT(A, p, r):
+    if p < r:
+        q = floor((p + r) / 2)
+        MERGE-SORT(A, p, q)
+        MERGE-SORT(A, q + 1, r)
+        MERGE(A, p, q, r)
+```
+
+#### Time/Space Complexity
+- Best Case: \( O(n \log n) \).
+- Average Case: \( O(n \log n) \).
+- Worst Case: \( O(n \log n) \).
+- Space Complexity: \( O(n) \) (extra space for merging).
+
+---
+
+### Strassen's Matrix Multiplication
+#### How It Works
+- Multiplies two \( n \times n \) matrices faster than the traditional \( O(n^3) \) algorithm.
+- Uses divide-and-conquer with fewer recursive multiplications.
+
+#### Significance
+- Reduces the complexity to \( O(n^{\log_2 7}) \), approximately \( O(n^{2.81}) \).
+
+---
+
+### Randomized Algorithms
+#### Example: Randomized QuickSort
+- Randomly selects a pivot element to improve expected performance.
+- Prevents worst-case scenarios caused by poor pivot choices in standard QuickSort.
+
+#### Key Idea
+- Randomized approach ensures balanced partitioning (on average).
+
+#### Example Application
+Used in cases where average performance is preferred over deterministic guarantees.
+
+---
+
+## Complexity Analysis Table
+
+| Algorithm                  | Best Case   | Average Case     | Worst Case      | Space Complexity |
+|----------------------------|-------------|------------------|-----------------|------------------|
+| **Insertion Sort**         | \( O(n) \)  | \( O(n^2) \)     | \( O(n^2) \)    | \( O(1) \)       |
+| **Merge Sort**             | \( O(n \log n) \) | \( O(n \log n) \) | \( O(n \log n) \) | \( O(n) \)       |
+| **Strassen's Multiplication** | -           | -                | \( O(n^{2.81}) \) | \( O(n^2) \)     |
+
+---
+
+## Theorems
+
+### **Master Theorem for Divide-and-Conquer**
+#### Formal Statement
+For a recurrence of the form:
+\[
+T(n) = aT\left(\frac{n}{b}\right) + f(n)
+\]
+where:
+- \( a \geq 1 \),
+- \( b > 1 \), and
+- \( f(n) \) is asymptotically positive,
+
+The solution to the recurrence is:
+1. If \( f(n) = O(n^{c}) \) and \( c < \log_b a \), then \( T(n) = \Theta(n^{\log_b a}) \).
+2. If \( f(n) = \Theta(n^{c}) \) and \( c = \log_b a \), then \( T(n) = \Theta(n^{c} \log n) \).
+3. If \( f(n) = \Omega(n^c) \) and \( c > \log_b a \), and \( af(n/b) \leq kf(n) \) for \( k < 1 \), then \( T(n) = \Theta(f(n)) \).
+
+#### Significance
+- Provides a shortcut to solve many recurrences arising in divide-and-conquer algorithms.
+
+---
+
+## Data Structures
+No new data structures are introduced explicitly in this section. Sorting algorithms discussed operate directly on arrays.
+
+---
+
+## Concrete Examples
+
+### Example of Insertion Sort:
+Input array: [5, 2, 4, 6, 1, 3]
+
+#### Iteration-by-Iteration Process:
+1. Initially [5] is sorted.
+2. Insert 2: [2, 5]
+3. Insert 4: [2, 4, 5]
+4. Insert 6: [2, 4, 5, 6]
+5. Insert 1: [1, 2, 4, 5, 6]
+6. Insert 3: [1, 2, 3, 4, 5, 6]
+
+### Example of Merge Sort
+Input array: [5, 2, 4, 6, 1, 3]
+
+#### Steps:
+1. Divide: [5, 2, 4] and [6, 1, 3].
+2. Recursively sort: [2, 4, 5] and [1, 3, 6].
+3. Merge: [1, 2, 3, 4, 5, 6].
+
+---
+
+## Summary
+Part I of *Introduction to Algorithms* sets the stage for designing and analyzing algorithms with foundational concepts like sorting, asymptotic analysis, divide-and-conquer, recurrences, and probabilistic methods. It emphasizes understanding both the theoretical and practical aspects of algorithm performance.

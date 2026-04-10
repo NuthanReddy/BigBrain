@@ -317,26 +317,36 @@ class DigestBuilder:
             return DigestResult(errors=[f"Document not found: {doc_id}"])
 
         # Check if KB content has changed since last digest
+        # Also verify all chapters are present (not just hash match)
         if not force and self._is_digest_current(doc):
-            logger.info("Digest up-to-date for %s — skipping", doc.title)
-            result = DigestResult()
-            result.output_dir = str(self._output_dir / _slugify(doc.title))
-            out_dir = Path(result.output_dir)
-            if out_dir.is_dir():
-                result.digest_files = sorted(
-                    str(p) for p in out_dir.glob("*.md") if not p.stem.startswith(".")
-                )
-                result.skipped = len(result.digest_files)
+            doc_slug = _slugify(doc.title)
+            out_dir = self._output_dir / doc_slug
+            existing = sorted(
+                str(p) for p in out_dir.glob("*.md") if not p.stem.startswith(".")
+            ) if out_dir.is_dir() else []
 
-            if target == "markdown":
+            # Count expected chapters to verify completeness
+            chapters = self._group_into_chapters(doc)
+            expected = sum(1 for _, c in chapters if c.strip())
+
+            if len(existing) >= expected:
+                logger.info("Digest up-to-date for %s (%d/%d chapters)", doc.title, len(existing), expected)
+                result = DigestResult()
+                result.output_dir = str(out_dir)
+                result.digest_files = existing
+                result.skipped = len(existing)
+
+                if target == "markdown":
+                    return result
+                if target in ("flashcard", "cheatsheet", "qa"):
+                    return self._reformat(doc, result, target=target, model=model, force=force)
+                elif target == "wiki":
+                    return self._to_wiki(doc, result)
+                elif target == "notion":
+                    return self._to_notion(doc, result, parent_id=notion_parent_id)
                 return result
-            if target in ("flashcard", "cheatsheet", "qa"):
-                return self._reformat(doc, result, target=target, model=model, force=force)
-            elif target == "wiki":
-                return self._to_wiki(doc, result)
-            elif target == "notion":
-                return self._to_notion(doc, result, parent_id=notion_parent_id)
-            return result
+            else:
+                logger.info("Digest incomplete: %d/%d chapters, continuing...", len(existing), expected)
 
         # Step 1: Generate base digest
         if no_ai:
@@ -448,15 +458,6 @@ class DigestBuilder:
         out_dir = self._output_dir / doc_slug
         out_dir.mkdir(parents=True, exist_ok=True)
         result.output_dir = str(out_dir)
-
-        # Check for existing digest files first (reuse hand-generated ones)
-        existing = sorted(out_dir.glob("*.md"))
-        existing = [p for p in existing if not p.stem.startswith(".")]
-        if existing and not force:
-            logger.info("Found %d existing digest files in %s", len(existing), out_dir)
-            result.digest_files = [str(p) for p in existing]
-            result.skipped = len(existing)
-            return result
 
         # Build chapter-level items from sections
         chapters = self._group_into_chapters(doc)
