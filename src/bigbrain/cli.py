@@ -2256,6 +2256,47 @@ def _handle_wiki(args: argparse.Namespace) -> int:
             print(f"  Errors:        {len(result.errors)}")
 
         print(f"\n  Wiki directory: wiki/")
+        print(f"  Serve with: bigbrain wiki serve")
+        return 0
+
+    elif action == "serve":
+        import subprocess
+        wiki_dir = Path("wiki")
+        if not wiki_dir.is_dir() or not list(wiki_dir.glob("*.md")):
+            print("No wiki pages found. Run 'bigbrain wiki build' first.")
+            return 1
+
+        # Ensure index.md exists (MkDocs requires it)
+        index_path = wiki_dir / "index.md"
+        if not index_path.exists():
+            overview = wiki_dir / "overview.md"
+            if overview.exists():
+                import shutil
+                shutil.copy2(overview, index_path)
+            else:
+                index_path.write_text(
+                    "# BigBrain Wiki\n\nWelcome. Run `bigbrain wiki build` to populate.\n",
+                    encoding="utf-8",
+                )
+
+        mkdocs_cfg = Path("mkdocs.yml")
+        if not mkdocs_cfg.exists():
+            print("mkdocs.yml not found.")
+            return 1
+
+        port = getattr(args, 'port', 8000) or 8000
+        print(f"Starting wiki server at http://localhost:{port}")
+        print("Press Ctrl+C to stop.\n")
+        try:
+            subprocess.run(
+                ["mkdocs", "serve", "--dev-addr", f"localhost:{port}"],
+                check=True,
+            )
+        except KeyboardInterrupt:
+            print("\nWiki server stopped.")
+        except FileNotFoundError:
+            print("mkdocs not found. Install with: pip install mkdocs mkdocs-material")
+            return 1
         return 0
 
     elif action == "status":
@@ -2291,14 +2332,15 @@ def _add_wiki_parser(subparsers: argparse._SubParsersAction) -> argparse.Argumen
     )
     p.add_argument(
         "action",
-        choices=["build", "status"],
-        help="Wiki action: build (generate pages), status (show wiki info)",
+        choices=["build", "serve", "status"],
+        help="Wiki action: build (generate pages), serve (launch web server), status (show info)",
     )
     p.add_argument("--doc-id", type=str, default="", help="Build only for a specific document")
     p.add_argument("--clean", action="store_true", default=False, help="Remove orphan wiki files not in current build")
     p.add_argument("--dry-run", action="store_true", default=False, help="Show what would be built without writing files")
     p.add_argument("--enrich", action="store_true", default=False, help="Use AI to expand entity descriptions on wiki pages")
     p.add_argument("--model", type=str, default="", help="Override AI model for wiki enrichment")
+    p.add_argument("--port", type=int, default=8000, help="Port for wiki web server (default: 8000)")
     p.set_defaults(func=_handle_wiki)
     return p
 
