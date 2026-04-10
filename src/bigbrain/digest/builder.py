@@ -57,6 +57,24 @@ Requirements:
 
 Study notes:'''
 
+_DIGEST_BATCH_TEMPLATE = '''Write comprehensive study notes for EACH of the following chapters from "{doc_title}".
+
+For EACH chapter, write a complete section starting with:
+# <Chapter Title>
+
+Then include:
+- ## Overview paragraph
+- ## Key Concepts with bullet points
+- ## Algorithms and Techniques with ### per algorithm (how it works, time/space complexity)
+- ## Complexity Analysis table if applicable
+- Theorems stated formally, data structures with operations, concrete examples
+
+IMPORTANT: Write ALL chapters below. Separate each with "# <Chapter Title>" on its own line.
+
+{chapters_block}
+
+Study notes (write ALL chapters, separated by # headings):'''
+
 _DIGEST_TEMPLATE_SHORT = '''Write a concise summary of this section from "{doc_title}".
 
 Section: {section_title}
@@ -103,6 +121,46 @@ def _slugify(text: str) -> str:
     text = re.sub(r"[\s_]+", "-", text)
     text = re.sub(r"-+", "-", text)
     return text.strip("-")[:80]
+
+
+# Max chars of source text per batch (~10K tokens ≈ 40K chars, leave room for prompt+response)
+_BATCH_MAX_CHARS = 30000
+
+
+def _split_batch_response(response: str, titles: list[str]) -> dict[str, str]:
+    """Split a batched AI response into per-chapter sections.
+
+    Looks for '# <title>' headings to split. Falls back to splitting
+    on any '# ' heading if exact titles aren't found.
+    """
+    result: dict[str, str] = {}
+
+    # Try splitting on exact titles first
+    parts = re.split(r'^# ', response, flags=re.MULTILINE)
+
+    for part in parts:
+        if not part.strip():
+            continue
+        # First line is the title
+        lines = part.split("\n", 1)
+        heading = lines[0].strip()
+        body = lines[1].strip() if len(lines) > 1 else ""
+
+        if not body:
+            continue
+
+        # Match to one of the expected titles
+        matched = False
+        for title in titles:
+            if title.lower().strip() in heading.lower():
+                result[title] = f"# {heading}\n\n{body}"
+                matched = True
+                break
+
+        if not matched:
+            result[heading] = f"# {heading}\n\n{body}"
+
+    return result
 
 
 @dataclass
@@ -243,52 +301,230 @@ class DigestBuilder:
     def _generate_base_digest(
         self, doc: Document, *, model: str = "", force: bool = False,
     ) -> DigestResult:
-        """Generate base markdown study notes per chunk. Cached on disk."""
+        """Generate study notes by batching chapters into minimal API calls.
+
+        Groups chapters into batches that fit within ~30K chars of source
+        text per call. The AI writes all chapters in one response, then
+        we split by '# <title>' headings and save each to a file.
+        """
         result = DigestResult()
         doc_slug = _slugify(doc.title)
         out_dir = self._output_dir / doc_slug
         out_dir.mkdir(parents=True, exist_ok=True)
         result.output_dir = str(out_dir)
 
-        # Get chunks or fall back to sections
-        chunks = self._store.get_chunks(doc.id)
-        items: list[tuple[str, str]] = []  # (title, content)
-
-        if chunks:
-            for c in chunks:
-                title = c.section_title or f"Section {c.chunk_index + 1}"
-                items.append((title, c.content or ""))
-        elif doc.sections:
-            for i, sec in enumerate(doc.sections):
-                title = sec.title or f"Section {i + 1}"
-                items.append((title, sec.content or ""))
-        else:
-            result.errors.append("No chunks or sections available")
+        # Check for existing digest files first (reuse hand-generated ones)
+        existing = sorted(out_dir.glob("*.md"))
+        existing = [p for p in existing if not p.stem.startswith(".")]
+        if existing and not force:
+            logger.info("Found %d existing digest files in %s", len(existing), out_dir)
+            result.digest_files = [str(p) for p in existing]
+            result.skipped = len(existing)
             return result
 
-        for title, content in items:
+        # Build chapter-level items from sections
+        chapters = self._group_into_chapters(doc)
+        if not chapters:
+            result.errors.append("No content available to digest")
+            return result
+
+        # Filter to chapters that need processing
+        to_process: list[tuple[str, str]] = []
+        for title, content in chapters:
             if not content.strip():
                 result.skipped += 1
                 continue
-
-            slug = _slugify(title) or f"section-{result.written + result.skipped + 1:02d}"
+            slug = _slugify(title) or f"chapter-{len(to_process) + 1:02d}"
             out_path = out_dir / f"{slug}.md"
-
             if out_path.exists() and not force:
-                logger.debug("Using cached: %s", out_path)
                 result.skipped += 1
                 result.digest_files.append(str(out_path))
                 continue
+            to_process.append((title, content))
 
-            prompt = (
-                _DIGEST_TEMPLATE if len(content) > 500 else _DIGEST_TEMPLATE_SHORT
-            ).format(doc_title=doc.title, section_title=title, content=content[:12000])
+        if not to_process:
+            logger.info("All chapters cached for %s", doc.title)
+            return result
+
+        # Batch chapters into groups that fit within the token budget
+        batches: list[list[tuple[str, str]]] = []
+        current_batch: list[tuple[str, str]] = []
+        current_size = 0
+
+        for title, content in to_process:
+            item_size = len(content[:8000])  # cap per-chapter source text
+            if current_batch and current_size + item_size > _BATCH_MAX_CHARS:
+                batches.append(current_batch)
+                current_batch = []
+                current_size = 0
+            current_batch.append((title, content))
+            current_size += item_size
+
+        if current_batch:
+            batches.append(current_batch)
+
+        logger.info(
+            "Digest: %d chapters in %d API call(s) for %s",
+            len(to_process), len(batches), doc.title,
+        )
+
+        # Process each batch with one API call
+        for batch_idx, batch in enumerate(batches):
+            titles = [t for t, _ in batch]
+
+            # Build the chapters block for the prompt
+            chapters_block_parts: list[str] = []
+            for title, content in batch:
+                truncated = content[:8000]
+                chapters_block_parts.append(
+                    f"=== {title} ===\n{truncated}"
+                )
+            chapters_block = "\n\n---\n\n".join(chapters_block_parts)
+
+            # Single batch prompt or per-chapter for single items
+            if len(batch) == 1:
+                title, content = batch[0]
+                prompt = _DIGEST_TEMPLATE.format(
+                    doc_title=doc.title,
+                    section_title=title,
+                    content=content[:12000],
+                )
+            else:
+                prompt = _DIGEST_BATCH_TEMPLATE.format(
+                    doc_title=doc.title,
+                    chapters_block=chapters_block,
+                )
 
             try:
                 resp = self._registry.chat(
                     [{"role": "system", "content": _DIGEST_SYSTEM},
                      {"role": "user", "content": prompt}],
-                    model=model, max_tokens=4000,
+                    model=model, max_tokens=4000 * len(batch),
+                )
+                response_text = resp.text.strip()
+
+                if len(batch) == 1:
+                    # Single chapter — save directly
+                    title = titles[0]
+                    slug = _slugify(title) or f"chapter-{result.written + 1:02d}"
+                    out_path = out_dir / f"{slug}.md"
+                    out_path.write_text(f"# {title}\n\n{response_text}\n", encoding="utf-8")
+                    result.written += 1
+                    result.digest_files.append(str(out_path))
+                    logger.info("Wrote: %s", out_path)
+                else:
+                    # Split batched response by chapter headings
+                    chapter_map = _split_batch_response(response_text, titles)
+
+                    for title in titles:
+                        content = chapter_map.get(title, "")
+                        if not content:
+                            # Try fuzzy match
+                            for key, val in chapter_map.items():
+                                if title.lower()[:20] in key.lower():
+                                    content = val
+                                    break
+
+                        slug = _slugify(title) or f"chapter-{result.written + 1:02d}"
+                        out_path = out_dir / f"{slug}.md"
+
+                        if content:
+                            out_path.write_text(content + "\n", encoding="utf-8")
+                            result.written += 1
+                            result.digest_files.append(str(out_path))
+                            logger.info("Wrote: %s", out_path)
+                        else:
+                            result.errors.append(f"{title}: not found in batch response")
+                            logger.warning("Chapter '%s' missing from batch %d response", title, batch_idx + 1)
+
+                logger.info("Batch %d/%d: processed %d chapters", batch_idx + 1, len(batches), len(batch))
+
+            except Exception as exc:
+                result.errors.append(f"Batch {batch_idx + 1}: {exc}")
+                logger.warning("Batch %d failed: %s", batch_idx + 1, exc)
+
+        return result
+
+    def _group_into_chapters(
+        self, doc: Document,
+    ) -> list[tuple[str, str]]:
+        """Group document sections into chapters.
+
+        Detection strategy:
+        1. If sections have chapter-like titles (Chapter N, Part N), use those as boundaries
+        2. Otherwise, merge sections into ~30-page groups
+        """
+        import re
+
+        sections = doc.sections or []
+        if not sections:
+            # Fall back to chunks
+            chunks = self._store.get_chunks(doc.id)
+            if chunks:
+                return [(c.section_title or f"Section {c.chunk_index + 1}", c.content or "") for c in chunks]
+            # Last resort: split full content
+            if doc.content:
+                return [("Full Document", doc.content)]
+            return []
+
+        # Detect chapter boundaries from section titles or content
+        chapter_re = re.compile(
+            r'^(?:Chapter|Part|Section|Unit|Module|Lecture)\s+\d',
+            re.IGNORECASE,
+        )
+
+        chapters: list[tuple[str, str]] = []
+        current_title = ""
+        current_parts: list[str] = []
+
+        for sec in sections:
+            title = sec.title or ""
+            content = sec.content or ""
+
+            # Check if this section starts a new chapter
+            is_chapter_start = bool(chapter_re.match(title))
+
+            # Also check first line of content for chapter headings
+            if not is_chapter_start and content:
+                first_line = content.split("\n")[0].strip()
+                is_chapter_start = bool(chapter_re.match(first_line))
+
+            if is_chapter_start and current_parts:
+                # Flush previous chapter
+                chapters.append((
+                    current_title or f"Chapter {len(chapters) + 1}",
+                    "\n\n".join(current_parts),
+                ))
+                current_parts = []
+                current_title = title if not title.startswith("Page") else ""
+
+            if not current_title or current_title.startswith("Page"):
+                current_title = title
+
+            if content.strip():
+                current_parts.append(content)
+
+        # Flush last chapter
+        if current_parts:
+            chapters.append((
+                current_title or f"Chapter {len(chapters) + 1}",
+                "\n\n".join(current_parts),
+            ))
+
+        # If no chapter headings found (all "Page N"), group by ~30 pages
+        if len(chapters) <= 1 and len(sections) > 30:
+            chapters = []
+            pages_per_chapter = 30
+            for i in range(0, len(sections), pages_per_chapter):
+                batch = sections[i:i + pages_per_chapter]
+                batch_content = "\n\n".join(s.content for s in batch if s.content)
+                if batch_content.strip():
+                    chapters.append((
+                        f"Pages {i + 1}-{min(i + pages_per_chapter, len(sections))}",
+                        batch_content,
+                    ))
+
+        return chapters
                 )
                 markdown = f"# {title}\n\n{resp.text.strip()}\n"
                 out_path.write_text(markdown, encoding="utf-8")
