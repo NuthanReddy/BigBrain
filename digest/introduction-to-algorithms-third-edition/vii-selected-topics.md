@@ -1,0 +1,67 @@
+# VII Selected Topics
+
+VII
+Selected Topics
+
+Introduction
+This part contains a selection of algorithmic topics that extend and complement
+earlier material in this book. Some chapters introduce new models of computation
+such as circuits or parallel computers. Others cover specialized domains such as
+computational geometry or number theory. The last two chapters discuss some of
+the known limitations to the design of efﬁcient algorithms and introduce techniques
+for coping with those limitations.
+Chapter 27 presents an algorithmic model for parallel computing based on dynamic multithreading. The chapter introduces the basics of the model, showing
+how to quantify parallelism in terms of the measures of work and span. It then
+investigates several interesting multithreaded algorithms, including algorithms for
+matrix multiplication and merge sorting.
+Chapter 28 studies efﬁcient algorithms for operating on matrices. It presents
+two general methods—LU decomposition and LUP decomposition—for solving
+linear equations by Gaussian elimination in O.n3/ time. It also shows that matrix
+inversion and matrix multiplication can be performed equally fast. The chapter
+concludes by showing how to compute a least-squares approximate solution when
+a set of linear equations has no exact solution.
+Chapter 29 studies linear programming, in which we wish to maximize or minimize an objective, given limited resources and competing constraints. Linear programming arises in a variety of practical application areas. This chapter covers how
+to formulate and solve linear programs. The solution method covered is the simplex algorithm, which is the oldest algorithm for linear programming. In contrast
+to many algorithms in this book, the simplex algorithm does not run in polynomial
+time in the worst case, but it is fairly efﬁcient and widely used in practice.
+
+Part VII
+Selected Topics
+Chapter 30 studies operations on polynomials and shows how to use a wellknown signal-processing technique—the fast Fourier transform (FFT)—to multiply two degree-n polynomials in O.n lg n/ time. It also investigates efﬁcient implementations of the FFT, including a parallel circuit.
+Chapter 31 presents number-theoretic algorithms. After reviewing elementary
+number theory, it presents Euclid’s algorithm for computing greatest common divisors. Next, it studies algorithms for solving modular linear equations and for
+raising one number to a power modulo another number. Then, it explores an important application of number-theoretic algorithms: the RSA public-key cryptosystem.
+This cryptosystem can be used not only to encrypt messages so that an adversary
+cannot read them, but also to provide digital signatures. The chapter then presents
+the Miller-Rabin randomized primality test, with which we can ﬁnd large primes
+efﬁciently—an essential requirement for the RSA system. Finally, the chapter covers Pollard’s “rho” heuristic for factoring integers and discusses the state of the art
+of integer factorization.
+Chapter 32 studies the problem of ﬁnding all occurrences of a given pattern
+string in a given text string, a problem that arises frequently in text-editing programs. After examining the naive approach, the chapter presents an elegant approach due to Rabin and Karp. Then, after showing an efﬁcient solution based
+on ﬁnite automata, the chapter presents the Knuth-Morris-Pratt algorithm, which
+modiﬁes the automaton-based algorithm to save space by cleverly preprocessing
+the pattern.
+Chapter 33 considers a few problems in computational geometry. After discussing basic primitives of computational geometry, the chapter shows how to use
+a “sweeping” method to efﬁciently determine whether a set of line segments contains any intersections. Two clever algorithms for ﬁnding the convex hull of a set of
+points—Graham’s scan and Jarvis’s march—also illustrate the power of sweeping
+methods. The chapter closes with an efﬁcient algorithm for ﬁnding the closest pair
+from among a given set of points in the plane.
+Chapter 34 concerns NP-complete problems. Many interesting computational
+problems are NP-complete, but no polynomial-time algorithm is known for solving
+any of them. This chapter presents techniques for determining when a problem is
+NP-complete. Several classic problems are proved to be NP-complete: determining
+whether a graph has a hamiltonian cycle, determining whether a boolean formula
+is satisﬁable, and determining whether a given set of numbers has a subset that
+adds up to a given target value. The chapter also proves that the famous travelingsalesman problem is NP-complete.
+Chapter 35 shows how to ﬁnd approximate solutions to NP-complete problems
+efﬁciently by using approximation algorithms. For some NP-complete problems,
+approximate solutions that are near optimal are quite easy to produce, but for others
+even the best approximation algorithms known work progressively more poorly as
+
+Part VII
+Selected Topics
+the problem size increases. Then, there are some problems for which we can invest
+increasing amounts of computation time in return for increasingly better approximate solutions. This chapter illustrates these possibilities with the vertex-cover
+problem (unweighted and weighted versions), an optimization version of 3-CNF
+satisﬁability, the traveling-salesman problem, the set-covering problem, and the
+subset-sum problem.

@@ -126,90 +126,147 @@ def _slugify(text: str) -> str:
 def _format_raw_text(text: str, chapter_title: str = "") -> str:
     """Convert raw PDF text into readable markdown.
 
-    Detects section headings (15.1, 15.2...), theorem/lemma/corollary
-    labels, procedure names, and adds markdown structure.
+    PDF text has NO paragraph breaks — every line is a single \\n.
+    Paragraphs are detected by: line ends with sentence-ending punctuation
+    AND the next line starts with a capital letter or is a structural element.
     """
+    # Step 1: Join hyphenated words at line breaks
+    text = re.sub(r'([a-z])-\n\s*([a-z])', r'\1\2', text)
+
+    # Build chapter info for header stripping
+    chapter_num_match = re.match(r'^(\d+)\s', chapter_title or "")
+    chapter_num = chapter_num_match.group(1) if chapter_num_match else ""
+    chapter_name = re.sub(r'^\d+\s*', '', chapter_title).strip() if chapter_title else ""
+
     lines = text.split("\n")
-    out: list[str] = []
 
-    if chapter_title:
-        out.append(f"# {chapter_title}\n")
+    # Step 2: Filter out noise (page numbers, running headers)
+    page_num_re = re.compile(r'^\d{1,4}$')
+    running_header_re = re.compile(r'^Chapter\s+\d+$')
 
-    # Patterns
-    # Section heading: "15.1 Rod cutting" or "15.1  Rod cutting"
-    section_re = re.compile(r'^(\d+\.\d+(?:\.\d+)?)\s{1,4}([A-Z].*)')
-    # Theorem/Lemma/Corollary: "Theorem 15.1" or "Lemma 15.2"
+    filtered: list[str] = []
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
+
+        # Skip bare page numbers
+        if page_num_re.match(s):
+            i += 1
+            continue
+        # Skip running header "Chapter N"
+        if running_header_re.match(s):
+            i += 1
+            if i < len(lines) and chapter_name and lines[i].strip() == chapter_name:
+                i += 1
+            continue
+        # Skip standalone chapter title repetition
+        if chapter_name and s == chapter_name:
+            i += 1
+            continue
+        # Skip bare chapter number
+        if chapter_num and s == chapter_num and i < 5:
+            i += 1
+            continue
+
+        if s:
+            filtered.append(s)
+        else:
+            filtered.append("")
+        i += 1
+
+    # Step 3: Detect structure and group into paragraphs
+    section_num_re = re.compile(r'^(\d+\.\d+(?:\.\d+)?)\s*$')
+    section_inline_re = re.compile(r'^(\d+\.\d+(?:\.\d+)?)\s{1,4}([A-Z].*)')
     theorem_re = re.compile(r'^(Theorem|Lemma|Corollary|Definition|Property)\s+[\d.]+')
-    # Procedure name: all-caps with hyphens like "CUT-ROD", "MERGE-SORT"
-    procedure_re = re.compile(r'^([A-Z][A-Z-]+(?:\.[A-Z-]+)?)\s*\(')
-    # Exercise heading: "Exercises" or "Problems"
+    procedure_re = re.compile(r'^([A-Z][A-Z-]{2,})\s*\(')
     exercise_re = re.compile(r'^(Exercises|Problems)\s*$')
-    # Equation label: "(15.1)" at end of line
-    equation_re = re.compile(r'\((\d+\.\d+)\)\s*$')
 
-    in_procedure = False
-    prev_blank = False
+    out: list[str] = []
+    if chapter_title:
+        out.append(f"# {chapter_title}")
+        out.append("")
 
-    for line in lines:
-        stripped = line.strip()
+    para_lines: list[str] = []
 
-        if not stripped:
-            if not prev_blank:
-                out.append("")
-            prev_blank = True
-            in_procedure = False
+    def flush_para():
+        if para_lines:
+            out.append(" ".join(para_lines))
+            out.append("")
+            para_lines.clear()
+
+    i = 0
+    while i < len(filtered):
+        line = filtered[i]
+
+        if not line:
+            flush_para()
+            i += 1
             continue
-        prev_blank = False
 
-        # Detect section headings → ## heading
-        m = section_re.match(stripped)
+        # Section number on its own line
+        m = section_num_re.match(line)
+        if m and i + 1 < len(filtered) and filtered[i + 1] and filtered[i + 1][0].isupper():
+            flush_para()
+            out.append(f"## {m.group(1)} {filtered[i + 1]}")
+            out.append("")
+            i += 2
+            continue
+
+        # Inline section heading
+        m = section_inline_re.match(line)
         if m:
-            out.append(f"\n## {m.group(1)} {m.group(2)}\n")
+            flush_para()
+            out.append(f"## {m.group(1)} {m.group(2)}")
+            out.append("")
+            i += 1
             continue
 
-        # Detect theorem/lemma → **bold** block
-        m = theorem_re.match(stripped)
-        if m:
-            out.append(f"\n> **{stripped}**\n")
+        # Theorem / Lemma
+        if theorem_re.match(line):
+            flush_para()
+            out.append(f"> **{line}**")
+            out.append("")
+            i += 1
             continue
 
-        # Detect procedure start → code block
-        m = procedure_re.match(stripped)
-        if m:
-            out.append(f"\n```\n{stripped}")
-            in_procedure = True
+        # Procedure (pseudocode)
+        if procedure_re.match(line):
+            flush_para()
+            out.append("```")
+            while i < len(filtered) and filtered[i]:
+                out.append(filtered[i])
+                i += 1
+                # End code block at blank line or next paragraph start
+                if i < len(filtered) and (not filtered[i] or (filtered[i][0].isupper() and len(filtered[i]) > 60)):
+                    break
+            out.append("```")
+            out.append("")
             continue
 
-        if in_procedure:
-            # Lines that look like pseudocode (indented or short)
-            if stripped and (line.startswith("  ") or line.startswith("\t") or len(stripped) < 80):
-                out.append(stripped)
-                continue
-            else:
-                out.append("```\n")
-                in_procedure = False
-
-        # Detect exercise headers
-        if exercise_re.match(stripped):
-            out.append(f"\n## {stripped}\n")
+        # Exercise heading
+        if exercise_re.match(line):
+            flush_para()
+            out.append(f"## {line}")
+            out.append("")
+            i += 1
             continue
 
-        # Format equations: wrap in $$ if it looks like math
-        if equation_re.search(stripped):
-            eq_match = equation_re.search(stripped)
-            label = eq_match.group(1) if eq_match else ""
-            out.append(f"{stripped}")
-            continue
+        # Regular line — accumulate into paragraph
+        para_lines.append(line)
 
-        # Regular text
-        out.append(stripped)
+        # Detect paragraph break: sentence ends AND next line starts new thought
+        if (line.endswith('.') or line.endswith(':') or line.endswith('?') or line.endswith('!')) \
+                and i + 1 < len(filtered) and filtered[i + 1]:
+            next_line = filtered[i + 1]
+            # New paragraph if next line starts with capital and isn't a continuation
+            if next_line[0].isupper() and not next_line[0:2] in ('We', 'Th', 'It', 'In', 'An', 'As', 'If', 'By', 'On', 'No', 'So', 'To'):
+                flush_para()
 
-    # Close any open procedure block
-    if in_procedure:
-        out.append("```")
+        i += 1
+
+    flush_para()
 
     result = "\n".join(out)
-    # Clean up excessive blank lines
     result = re.sub(r"\n{3,}", "\n\n", result)
     return result.strip() + "\n"
 

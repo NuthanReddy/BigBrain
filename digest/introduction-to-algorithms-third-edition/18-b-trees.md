@@ -1,0 +1,1060 @@
+# 18 B-Trees
+
+B-Trees
+B-trees are balanced search trees designed to work well on disks or other directaccess secondary storage devices. B-trees are similar to red-black trees (Chapter 13), but they are better at minimizing disk I/O operations. Many database systems use B-trees, or variants of B-trees, to store information.
+B-trees differ from red-black trees in that B-tree nodes may have many children,
+from a few to thousands. That is, the “branching factor” of a B-tree can be quite
+large, although it usually depends on characteristics of the disk unit used. B-trees
+are similar to red-black trees in that every n-node B-tree has height O.lg n/. The
+exact height of a B-tree can be considerably less than that of a red-black tree,
+however, because its branching factor, and hence the base of the logarithm that
+expresses its height, can be much larger. Therefore, we can also use B-trees to
+implement many dynamic-set operations in time O.lg n/.
+B-trees generalize binary search trees in a natural manner. Figure 18.1 shows a
+simple B-tree. If an internal B-tree node x contains x:n keys, then x has x:n C 1
+children. The keys in node x serve as dividing points separating the range of keys
+handled by x into x:n C 1 subranges, each handled by one child of x. When
+searching for a key in a B-tree, we make an .x:n C 1/-way decision based on
+comparisons with the x:n keys stored at node x. The structure of leaf nodes differs
+from that of internal nodes; we will examine these differences in Section 18.1.
+Section 18.1 gives a precise deﬁnition of B-trees and proves that the height of
+a B-tree grows only logarithmically with the number of nodes it contains. Section 18.2 describes how to search for a key and insert a key into a B-tree, and
+Section 18.3 discusses deletion. Before proceeding, however, we need to ask why
+we evaluate data structures designed to work on a disk differently from data structures designed to work in main random-access memory.
+Data structures on secondary storage
+Computer systems take advantage of various technologies that provide memory
+capacity. The primary memory (or main memory) of a computer system normally
+
+B
+C
+F
+G
+J
+K
+L
+D H
+N
+P
+R
+S
+V W
+Y
+Z
+Q
+T
+X
+M
+T:root
+Figure 18.1
+A B-tree whose keys are the consonants of English. An internal node x containing
+x:n keys has x:n C 1 children. All leaves are at the same depth in the tree. The lightly shaded nodes
+are examined in a search for the letter R.
+platter
+track
+arms
+read/write
+head
+spindle
+Figure 18.2
+A typical disk drive. It comprises one or more platters (two platters are shown here)
+that rotate around a spindle. Each platter is read and written with a head at the end of an arm. Arms
+rotate around a common pivot axis. A track is the surface that passes beneath the read/write head
+when the head is stationary.
+consists of silicon memory chips. This technology is typically more than an order
+of magnitude more expensive per bit stored than magnetic storage technology, such
+as tapes or disks. Most computer systems also have secondary storage based on
+magnetic disks; the amount of such secondary storage often exceeds the amount of
+primary memory by at least two orders of magnitude.
+Figure 18.2 shows a typical disk drive. The drive consists of one or more platters, which rotate at a constant speed around a common spindle. A magnetizable
+material covers the surface of each platter. The drive reads and writes each platter
+by a head at the end of an arm. The arms can move their heads toward or away
+
+from the spindle. When a given head is stationary, the surface that passes underneath it is called a track. Multiple platters increase only the disk drive’s capacity
+and not its performance.
+Although disks are cheaper and have higher capacity than main memory, they are
+much, much slower because they have moving mechanical parts.1 The mechanical
+motion has two components: platter rotation and arm movement. As of this writing,
+commodity disks rotate at speeds of 5400–15,000 revolutions per minute (RPM).
+We typically see 15,000 RPM speeds in server-grade drives, 7200 RPM speeds
+in drives for desktops, and 5400 RPM speeds in drives for laptops.
+Although
+7200 RPM may seem fast, one rotation takes 8.33 milliseconds, which is over 5
+orders of magnitude longer than the 50 nanosecond access times (more or less)
+commonly found for silicon memory. In other words, if we have to wait a full rotation for a particular item to come under the read/write head, we could access main
+memory more than 100,000 times during that span. On average we have to wait
+for only half a rotation, but still, the difference in access times for silicon memory
+compared with disks is enormous. Moving the arms also takes some time. As of
+this writing, average access times for commodity disks are in the range of 8 to 11
+milliseconds.
+In order to amortize the time spent waiting for mechanical movements, disks
+access not just one item but several at a time. Information is divided into a number
+of equal-sized pages of bits that appear consecutively within tracks, and each disk
+read or write is of one or more entire pages. For a typical disk, a page might be 211
+to 214 bytes in length. Once the read/write head is positioned correctly and the disk
+has rotated to the beginning of the desired page, reading or writing a magnetic disk
+is entirely electronic (aside from the rotation of the disk), and the disk can quickly
+read or write large amounts of data.
+Often, accessing a page of information and reading it from a disk takes longer
+than examining all the information read. For this reason, in this chapter we shall
+look separately at the two principal components of the running time:
+
+the number of disk accesses, and
+
+the CPU (computing) time.
+We measure the number of disk accesses in terms of the number of pages of information that need to be read from or written to the disk. We note that disk-access
+time is not constant—it depends on the distance between the current track and
+the desired track and also on the initial rotational position of the disk. We shall
+1As of this writing, solid-state drives have recently come onto the consumer market. Although they
+are faster than mechanical disk drives, they cost more per gigabyte and have lower capacities than
+mechanical disk drives.
+
+nonetheless use the number of pages read or written as a ﬁrst-order approximation
+of the total time spent accessing the disk.
+In a typical B-tree application, the amount of data handled is so large that all
+the data do not ﬁt into main memory at once. The B-tree algorithms copy selected
+pages from disk into main memory as needed and write back onto disk the pages
+that have changed. B-tree algorithms keep only a constant number of pages in
+main memory at any time; thus, the size of main memory does not limit the size of
+B-trees that can be handled.
+We model disk operations in our pseudocode as follows. Let x be a pointer to an
+object. If the object is currently in the computer’s main memory, then we can refer
+to the attributes of the object as usual: x:key, for example. If the object referred to
+by x resides on disk, however, then we must perform the operation DISK-READ.x/
+to read object x into main memory before we can refer to its attributes. (We assume that if x is already in main memory, then DISK-READ.x/ requires no disk
+accesses; it is a “no-op.”) Similarly, the operation DISK-WRITE.x/ is used to save
+any changes that have been made to the attributes of object x. That is, the typical
+pattern for working with an object is as follows:
+x D a pointer to some object
+DISK-READ.x/
+operations that access and/or modify the attributes of x
+DISK-WRITE.x/
+// omitted if no attributes of x were changed
+other operations that access but do not modify attributes of x
+The system can keep only a limited number of pages in main memory at any one
+time. We shall assume that the system ﬂushes from main memory pages no longer
+in use; our B-tree algorithms will ignore this issue.
+Since in most systems the running time of a B-tree algorithm depends primarily on the number of DISK-READ and DISK-WRITE operations it performs, we
+typically want each of these operations to read or write as much information as
+possible. Thus, a B-tree node is usually as large as a whole disk page, and this size
+limits the number of children a B-tree node can have.
+For a large B-tree stored on a disk, we often see branching factors between 50
+and 2000, depending on the size of a key relative to the size of a page. A large
+branching factor dramatically reduces both the height of the tree and the number of
+disk accesses required to ﬁnd any key. Figure 18.3 shows a B-tree with a branching
+factor of 1001 and height 2 that can store over one billion keys; nevertheless, since
+we can keep the root node permanently in main memory, we can ﬁnd any key in
+this tree by making at most only two disk accesses.
+
+…
+1 node,
+1000 keys
+1001 nodes,
+1,001,000 keys
+1,002,001 nodes,
+1,002,001,000 keys
+…
+T:root
+Figure 18.3
+A B-tree of height 2 containing over one billion keys. Shown inside each node x
+is x:n, the number of keys in x. Each internal node and leaf contains 1000 keys. This B-tree has
+1001 nodes at depth 1 and over one million leaves at depth 2.
+
+## 18.1 Deﬁnition of B-trees
+
+To keep things simple, we assume, as we have for binary search trees and red-black
+trees, that any “satellite information” associated with a key resides in the same
+node as the key. In practice, one might actually store with each key just a pointer to
+another disk page containing the satellite information for that key. The pseudocode
+in this chapter implicitly assumes that the satellite information associated with a
+key, or the pointer to such satellite information, travels with the key whenever the
+key is moved from node to node. A common variant on a B-tree, known as a
+BC-tree, stores all the satellite information in the leaves and stores only keys and
+child pointers in the internal nodes, thus maximizing the branching factor of the
+internal nodes.
+A B-tree T is a rooted tree (whose root is T:root) having the following properties:
+1. Every node x has the following attributes:
+a. x:n, the number of keys currently stored in node x,
+b. the x:n keys themselves, x:key1; x:key2; : : : ; x:keyx:n, stored in nondecreasing order, so that x:key1  x:key2      x:keyx:n,
+c. x:leaf , a boolean value that is TRUE if x is a leaf and FALSE if x is an internal
+node.
+2. Each internal node x also contains x:n C 1 pointers x:c1; x:c2; : : : ; x:cx:nC1 to
+its children. Leaf nodes have no children, and so their ci attributes are undeﬁned.
+
+## 18.1 Deﬁnition of B-trees
+
+3. The keys x:keyi separate the ranges of keys stored in each subtree: if ki is any
+key stored in the subtree with root x:ci, then
+k1  x:key1  k2  x:key2      x:keyx:n  kx:nC1 :
+4. All leaves have the same depth, which is the tree’s height h.
+5. Nodes have lower and upper bounds on the number of keys they can contain.
+We express these bounds in terms of a ﬁxed integer t  2 called the minimum
+degree of the B-tree:
+a. Every node other than the root must have at least t  1 keys. Every internal
+node other than the root thus has at least t children. If the tree is nonempty,
+the root must have at least one key.
+b. Every node may contain at most 2t  1 keys. Therefore, an internal node
+may have at most 2t children. We say that a node is full if it contains exactly
+2t  1 keys.2
+The simplest B-tree occurs when t D 2. Every internal node then has either 2,
+3, or 4 children, and we have a 2-3-4 tree. In practice, however, much larger values
+of t yield B-trees with smaller height.
+The height of a B-tree
+The number of disk accesses required for most operations on a B-tree is proportional to the height of the B-tree. We now analyze the worst-case height of a B-tree.
+
+> **Theorem 18.1**
+
+If n  1, then for any n-key B-tree T of height h and minimum degree t  2,
+h  logt
+n C 1
+:
+Proof
+The root of a B-tree T contains at least one key, and all other nodes contain
+at least t  1 keys. Thus, T , whose height is h, has at least 2 nodes at depth 1, at
+least 2t nodes at depth 2, at least 2t2 nodes at depth 3, and so on, until at depth h
+it has at least 2th1 nodes. Figure 18.4 illustrates such a tree for h D 3. Thus, the
+2Another common variant on a B-tree, known as a B-tree, requires each internal node to be at
+least 2=3 full, rather than at least half full, as a B-tree requires.
+
+t – 1
+t – 1
+t – 1
+…
+t
+t – 1
+t
+…
+t – 1
+t – 1
+t – 1
+…
+t
+t – 1
+t – 1
+t – 1
+…
+t
+t – 1
+t
+…
+t – 1
+t – 1
+t – 1
+…
+t
+depth
+number
+of nodes
+2t2
+2t
+T:root
+Figure 18.4
+A B-tree of height 3 containing a minimum possible number of keys. Shown inside
+each node x is x:n.
+number n of keys satisﬁes the inequality
+n
+
+1 C .t  1/
+h
+X
+iD1
+2ti1
+D
+1 C 2.t  1/
+th  1
+t  1
+
+D
+2th  1 :
+By simple algebra, we get th  .n C 1/=2. Taking base-t logarithms of both sides
+proves the theorem.
+Here we see the power of B-trees, as compared with red-black trees. Although
+the height of the tree grows as O.lg n/ in both cases (recall that t is a constant), for
+B-trees the base of the logarithm can be many times larger. Thus, B-trees save a
+factor of about lg t over red-black trees in the number of nodes examined for most
+tree operations. Because we usually have to access the disk to examine an arbitrary
+node in a tree, B-trees avoid a substantial number of disk accesses.
+
+## Exercises
+
+18.1-1
+Why don’t we allow a minimum degree of t D 1?
+18.1-2
+For what values of t is the tree of Figure 18.1 a legal B-tree?
+
+## 18.2 Basic operations on B-trees
+
+18.1-3
+Show all legal B-trees of minimum degree 2 that represent f1; 2; 3; 4; 5g.
+18.1-4
+As a function of the minimum degree t, what is the maximum number of keys that
+can be stored in a B-tree of height h?
+18.1-5
+Describe the data structure that would result if each black node in a red-black tree
+were to absorb its red children, incorporating their children with its own.
+
+## 18.2 Basic operations on B-trees
+
+In this section, we present the details of the operations B-TREE-SEARCH, BTREE-CREATE, and B-TREE-INSERT. In these procedures, we adopt two conventions:
+
+The root of the B-tree is always in main memory, so that we never need to
+perform a DISK-READ on the root; we do have to perform a DISK-WRITE of
+the root, however, whenever the root node is changed.
+
+Any nodes that are passed as parameters must already have had a DISK-READ
+operation performed on them.
+The procedures we present are all “one-pass” algorithms that proceed downward
+from the root of the tree, without having to back up.
+Searching a B-tree
+Searching a B-tree is much like searching a binary search tree, except that instead
+of making a binary, or “two-way,” branching decision at each node, we make a
+multiway branching decision according to the number of the node’s children. More
+precisely, at each internal node x, we make an .x:n C 1/-way branching decision.
+B-TREE-SEARCH is a straightforward generalization of the TREE-SEARCH procedure deﬁned for binary search trees. B-TREE-SEARCH takes as input a pointer
+to the root node x of a subtree and a key k to be searched for in that subtree. The
+top-level call is thus of the form B-TREE-SEARCH.T:root; k/. If k is in the B-tree,
+B-TREE-SEARCH returns the ordered pair .y; i/ consisting of a node y and an
+index i such that y:keyi D k. Otherwise, the procedure returns NIL.
+
+B-TREE-SEARCH.x; k/
+i D 1
+while i  x:n and k > x:keyi
+i D i C 1
+if i  x:n and k == x:keyi
+return .x; i/
+elseif x:leaf
+return NIL
+else DISK-READ.x:ci/
+return B-TREE-SEARCH.x:ci; k/
+Using a linear-search procedure, lines 1–3 ﬁnd the smallest index i such that
+k  x:keyi, or else they set i to x:n C 1. Lines 4–5 check to see whether we
+have now discovered the key, returning if we have. Otherwise, lines 6–9 either terminate the search unsuccessfully (if x is a leaf) or recurse to search the appropriate
+subtree of x, after performing the necessary DISK-READ on that child.
+Figure 18.1 illustrates the operation of B-TREE-SEARCH. The procedure examines the lightly shaded nodes during a search for the key R.
+As in the TREE-SEARCH procedure for binary search trees, the nodes encountered during the recursion form a simple path downward from the root of the
+tree. The B-TREE-SEARCH procedure therefore accesses O.h/ D O.logt n/ disk
+pages, where h is the height of the B-tree and n is the number of keys in the B-tree.
+Since x:n < 2t, the while loop of lines 2–3 takes O.t/ time within each node, and
+the total CPU time is O.th/ D O.t logt n/.
+Creating an empty B-tree
+To build a B-tree T , we ﬁrst use B-TREE-CREATE to create an empty root node
+and then call B-TREE-INSERT to add new keys. Both of these procedures use an
+auxiliary procedure ALLOCATE-NODE, which allocates one disk page to be used
+as a new node in O.1/ time. We can assume that a node created by ALLOCATENODE requires no DISK-READ, since there is as yet no useful information stored
+on the disk for that node.
+B-TREE-CREATE.T /
+x D ALLOCATE-NODE./
+x:leaf D TRUE
+x:n D 0
+DISK-WRITE.x/
+T:root D x
+B-TREE-CREATE requires O.1/ disk operations and O.1/ CPU time.
+
+## 18.2 Basic operations on B-trees
+
+Inserting a key into a B-tree
+Inserting a key into a B-tree is signiﬁcantly more complicated than inserting a key
+into a binary search tree. As with binary search trees, we search for the leaf position
+at which to insert the new key. With a B-tree, however, we cannot simply create
+a new leaf node and insert it, as the resulting tree would fail to be a valid B-tree.
+Instead, we insert the new key into an existing leaf node. Since we cannot insert a
+key into a leaf node that is full, we introduce an operation that splits a full node y
+(having 2t 1 keys) around its median key y:keyt into two nodes having only t 1
+keys each. The median key moves up into y’s parent to identify the dividing point
+between the two new trees. But if y’s parent is also full, we must split it before we
+can insert the new key, and thus we could end up splitting full nodes all the way up
+the tree.
+As with a binary search tree, we can insert a key into a B-tree in a single pass
+down the tree from the root to a leaf. To do so, we do not wait to ﬁnd out whether
+we will actually need to split a full node in order to do the insertion. Instead, as we
+travel down the tree searching for the position where the new key belongs, we split
+each full node we come to along the way (including the leaf itself). Thus whenever
+we want to split a full node y, we are assured that its parent is not full.
+Splitting a node in a B-tree
+The procedure B-TREE-SPLIT-CHILD takes as input a nonfull internal node x (assumed to be in main memory) and an index i such that x:ci (also assumed to be in
+main memory) is a full child of x. The procedure then splits this child in two and
+adjusts x so that it has an additional child. To split a full root, we will ﬁrst make the
+root a child of a new empty root node, so that we can use B-TREE-SPLIT-CHILD.
+The tree thus grows in height by one; splitting is the only means by which the tree
+grows.
+Figure 18.5 illustrates this process. We split the full node y D x:ci about its
+median key S, which moves up into y’s parent node x. Those keys in y that are
+greater than the median key move into a new node ´, which becomes a new child
+of x.
+
+R
+S
+T
+Q
+P
+U
+V
+N W
+…
+…
+R
+Q
+P
+T
+U
+V
+N
+W
+S
+…
+…
+x
+x
+T1
+T1
+T2
+T2
+T3
+T3
+T4
+T4
+T5
+T5
+T6
+T6
+T7
+T7
+T8
+T8
+y D x:ci
+y D x:ci
+´ D x:ciC1
+x:keyi1
+x:keyi1
+x:keyi
+x:keyi
+x:keyiC1
+Figure 18.5
+Splitting a node with t D 4. Node y D x:ci splits into two nodes, y and ´, and the
+median key S of y moves up into y’s parent.
+B-TREE-SPLIT-CHILD.x; i/
+´ D ALLOCATE-NODE./
+y D x:ci
+´:leaf D y:leaf
+´:n D t  1
+for j D 1 to t  1
+´:keyj D y:keyjCt
+if not y:leaf
+for j D 1 to t
+´:cj D y:cjCt
+y:n D t  1
+for j D x:n C 1 downto i C 1
+x:cjC1 D x:cj
+x:ciC1 D ´
+for j D x:n downto i
+x:keyjC1 D x:keyj
+x:keyi D y:keyt
+x:n D x:n C 1
+DISK-WRITE.y/
+DISK-WRITE.´/
+DISK-WRITE.x/
+B-TREE-SPLIT-CHILD works by straightforward “cutting and pasting.” Here, x
+is the node being split, and y is x’s ith child (set in line 2). Node y originally has 2t
+children (2t  1 keys) but is reduced to t children (t  1 keys) by this operation.
+Node ´ takes the t largest children (t  1 keys) from y, and ´ becomes a new child
+
+## 18.2 Basic operations on B-trees
+
+of x, positioned just after y in x’s table of children. The median key of y moves
+up to become the key in x that separates y and ´.
+Lines 1–9 create node ´ and give it the largest t  1 keys and corresponding t
+children of y. Line 10 adjusts the key count for y. Finally, lines 11–17 insert ´ as
+a child of x, move the median key from y up to x in order to separate y from ´,
+and adjust x’s key count. Lines 18–20 write out all modiﬁed disk pages. The
+CPU time used by B-TREE-SPLIT-CHILD is ‚.t/, due to the loops on lines 5–6
+and 8–9. (The other loops run for O.t/ iterations.) The procedure performs O.1/
+disk operations.
+Inserting a key into a B-tree in a single pass down the tree
+We insert a key k into a B-tree T of height h in a single pass down the tree, requiring O.h/ disk accesses. The CPU time required is O.th/ D O.t logt n/. The
+B-TREE-INSERT procedure uses B-TREE-SPLIT-CHILD to guarantee that the recursion never descends to a full node.
+B-TREE-INSERT.T; k/
+r D T:root
+if r:n == 2t  1
+s D ALLOCATE-NODE./
+T:root D s
+s:leaf D FALSE
+s:n D 0
+s:c1 D r
+B-TREE-SPLIT-CHILD.s; 1/
+B-TREE-INSERT-NONFULL.s; k/
+else B-TREE-INSERT-NONFULL.r; k/
+Lines 3–9 handle the case in which the root node r is full: the root splits and a
+new node s (having two children) becomes the root. Splitting the root is the only
+way to increase the height of a B-tree. Figure 18.6 illustrates this case. Unlike a
+binary search tree, a B-tree increases in height at the top instead of at the bottom.
+The procedure ﬁnishes by calling B-TREE-INSERT-NONFULL to insert key k into
+the tree rooted at the nonfull root node. B-TREE-INSERT-NONFULL recurses as
+necessary down the tree, at all times guaranteeing that the node to which it recurses
+is not full by calling B-TREE-SPLIT-CHILD as necessary.
+The auxiliary recursive procedure B-TREE-INSERT-NONFULL inserts key k into
+node x, which is assumed to be nonfull when the procedure is called. The operation
+of B-TREE-INSERT and the recursive operation of B-TREE-INSERT-NONFULL
+guarantee that this assumption is true.
+
+T8
+T7
+T6
+T5
+T4
+T3
+T2
+T1
+T8
+T7
+T6
+T5
+T4
+T3
+T2
+T1
+F
+H
+L
+D
+A
+N
+P
+F
+D
+A
+L
+N
+P
+s
+H
+r
+r
+T:root
+T:root
+Figure 18.6
+Splitting the root with t D 4. Root node r splits in two, and a new root node s is
+created. The new root contains the median key of r and has the two halves of r as children. The
+B-tree grows in height by one when the root is split.
+B-TREE-INSERT-NONFULL.x; k/
+i D x:n
+if x:leaf
+while i  1 and k < x:keyi
+x:keyiC1 D x:keyi
+i D i  1
+x:keyiC1 D k
+x:n D x:n C 1
+DISK-WRITE.x/
+else while i  1 and k < x:keyi
+i D i  1
+i D i C 1
+DISK-READ.x:ci/
+if x:ci:n == 2t  1
+B-TREE-SPLIT-CHILD.x; i/
+if k > x:keyi
+i D i C 1
+B-TREE-INSERT-NONFULL.x:ci; k/
+The B-TREE-INSERT-NONFULL procedure works as follows. Lines 3–8 handle
+the case in which x is a leaf node by inserting key k into x. If x is not a leaf
+node, then we must insert k into the appropriate leaf node in the subtree rooted
+at internal node x. In this case, lines 9–11 determine the child of x to which the
+recursion descends. Line 13 detects whether the recursion would descend to a full
+child, in which case line 14 uses B-TREE-SPLIT-CHILD to split that child into two
+nonfull children, and lines 15–16 determine which of the two children is now the
+
+## 18.2 Basic operations on B-trees
+
+correct one to descend to. (Note that there is no need for a DISK-READ.x:ci/ after
+line 16 increments i, since the recursion will descend in this case to a child that
+was just created by B-TREE-SPLIT-CHILD.) The net effect of lines 13–16 is thus
+to guarantee that the procedure never recurses to a full node. Line 17 then recurses
+to insert k into the appropriate subtree. Figure 18.7 illustrates the various cases of
+inserting into a B-tree.
+For a B-tree of height h, B-TREE-INSERT performs O.h/ disk accesses, since
+only O.1/ DISK-READ and DISK-WRITE operations occur between calls to
+B-TREE-INSERT-NONFULL. The total CPU time used is O.th/ D O.t logt n/.
+Since B-TREE-INSERT-NONFULL is tail-recursive, we can alternatively implement it as a while loop, thereby demonstrating that the number of pages that need
+to be in main memory at any time is O.1/.
+
+## Exercises
+
+18.2-1
+Show the results of inserting the keys
+F; S; Q; K; C; L; H; T; V; W; M; R; N; P; A; B; X; Y; D; Z; E
+in order into an empty B-tree with minimum degree 2. Draw only the conﬁgurations of the tree just before some node must split, and also draw the ﬁnal conﬁguration.
+18.2-2
+Explain under what circumstances, if any, redundant DISK-READ or DISK-WRITE
+operations occur during the course of executing a call to B-TREE-INSERT. (A
+redundant DISK-READ is a DISK-READ for a page that is already in memory.
+A redundant DISK-WRITE writes to disk a page of information that is identical to
+what is already stored there.)
+18.2-3
+Explain how to ﬁnd the minimum key stored in a B-tree and how to ﬁnd the predecessor of a given key stored in a B-tree.
+18.2-4
+?
+Suppose that we insert the keys f1; 2; : : : ; ng into an empty B-tree with minimum
+degree 2. How many nodes does the ﬁnal B-tree have?
+18.2-5
+Since leaf nodes require no pointers to children, they could conceivably use a different (larger) t value than internal nodes for the same disk page size. Show how
+to modify the procedures for creating and inserting into a B-tree to handle this
+variation.
+
+J
+K
+N O
+R
+S
+T
+D
+E
+C
+A
+U
+V
+Y
+Z
+P
+X
+M
+G
+(a)
+J
+K
+N O
+R
+S
+T
+D
+E
+B
+A
+U
+V
+Y
+Z
+P
+X
+M
+G
+(b)
+C
+J
+K
+N O
+D
+E
+B
+A
+U
+V
+Y
+Z
+P
+X
+M
+G
+(c)
+C
+R
+S
+Q
+T
+J
+K
+N O
+D
+E
+B
+A
+U
+V
+Y
+Z
+M
+G
+(d)
+C
+R
+S
+Q
+L
+P
+X
+T
+J
+K
+N O
+D
+E
+B
+A
+U
+V
+Y
+Z
+M
+G
+(e)
+C
+R
+S
+Q
+L
+P
+X
+T
+F
+Q inserted
+L inserted
+F inserted
+initial tree
+B inserted
+Figure 18.7
+Inserting keys into a B-tree. The minimum degree t for this B-tree is 3, so a node can
+hold at most 5 keys. Nodes that are modiﬁed by the insertion process are lightly shaded. (a) The
+initial tree for this example. (b) The result of inserting B into the initial tree; this is a simple insertion
+into a leaf node. (c) The result of inserting Q into the previous tree. The node RST U V splits into
+two nodes containing RS and U V , the key T moves up to the root, and Q is inserted in the leftmost
+of the two halves (the RS node). (d) The result of inserting L into the previous tree. The root
+splits right away, since it is full, and the B-tree grows in height by one. Then L is inserted into the
+leaf containing JK. (e) The result of inserting F into the previous tree. The node ABCDE splits
+before F is inserted into the rightmost of the two halves (the DE node).
+
+## 18.3 Deleting a key from a B-tree
+
+18.2-6
+Suppose that we were to implement B-TREE-SEARCH to use binary search rather
+than linear search within each node. Show that this change makes the CPU time
+required O.lg n/, independently of how t might be chosen as a function of n.
+18.2-7
+Suppose that disk hardware allows us to choose the size of a disk page arbitrarily,
+but that the time it takes to read the disk page is aCbt, where a and b are speciﬁed
+constants and t is the minimum degree for a B-tree using pages of the selected size.
+Describe how to choose t so as to minimize (approximately) the B-tree search time.
+Suggest an optimal value of t for the case in which a D 5 milliseconds and b D 10
+microseconds.
+
+## 18.3 Deleting a key from a B-tree
+
+Deletion from a B-tree is analogous to insertion but a little more complicated, because we can delete a key from any node—not just a leaf—and when we delete a
+key from an internal node, we will have to rearrange the node’s children. As in
+insertion, we must guard against deletion producing a tree whose structure violates
+the B-tree properties. Just as we had to ensure that a node didn’t get too big due to
+insertion, we must ensure that a node doesn’t get too small during deletion (except
+that the root is allowed to have fewer than the minimum number t  1 of keys).
+Just as a simple insertion algorithm might have to back up if a node on the path
+to where the key was to be inserted was full, a simple approach to deletion might
+have to back up if a node (other than the root) along the path to where the key is to
+be deleted has the minimum number of keys.
+The procedure B-TREE-DELETE deletes the key k from the subtree rooted at x.
+We design this procedure to guarantee that whenever it calls itself recursively on a
+node x, the number of keys in x is at least the minimum degree t. Note that this
+condition requires one more key than the minimum required by the usual B-tree
+conditions, so that sometimes a key may have to be moved into a child node before
+recursion descends to that child. This strengthened condition allows us to delete a
+key from the tree in one downward pass without having to “back up” (with one exception, which we’ll explain). You should interpret the following speciﬁcation for
+deletion from a B-tree with the understanding that if the root node x ever becomes
+an internal node having no keys (this situation can occur in cases 2c and 3b on
+pages 501–502), then we delete x, and x’s only child x:c1 becomes the new root
+of the tree, decreasing the height of the tree by one and preserving the property that
+the root of the tree contains at least one key (unless the tree is empty).
+
+J
+K
+N O
+D
+E
+B
+A
+U
+V
+Y
+Z
+M
+G
+(a)
+C
+R
+S
+Q
+L
+P
+X
+T
+F
+initial tree
+J
+K
+N O
+D
+E
+B
+A
+U
+V
+Y
+Z
+M
+G
+(b)
+C
+R
+S
+Q
+L
+P
+X
+T
+F deleted: case 1
+J
+K
+N O
+D
+E
+B
+A
+U
+V
+Y
+Z
+G
+(c)
+C
+R
+S
+Q
+L
+P
+X
+T
+M deleted: case 2a
+J
+K
+N O
+D
+E
+B
+A
+U
+V
+Y
+Z
+(d)
+C
+R
+S
+Q
+L
+P
+X
+T
+G deleted: case 2c
+Figure 18.8
+Deleting keys from a B-tree. The minimum degree for this B-tree is t D 3, so a node
+(other than the root) cannot have fewer than 2 keys. Nodes that are modiﬁed are lightly shaded.
+(a) The B-tree of Figure 18.7(e). (b) Deletion of F . This is case 1: simple deletion from a leaf.
+(c) Deletion of M. This is case 2a: the predecessor L of M moves up to take M’s position. (d) Deletion of G. This is case 2c: we push G down to make node DEGJK and then delete G from this leaf
+(case 1).
+We sketch how deletion works instead of presenting the pseudocode. Figure 18.8
+illustrates the various cases of deleting keys from a B-tree.
+1. If the key k is in node x and x is a leaf, delete the key k from x.
+2. If the key k is in node x and x is an internal node, do the following:
+
+## 18.3 Deleting a key from a B-tree
+
+J
+K
+N O
+E
+B
+A
+U
+V
+Y
+Z
+(e)
+C
+R
+S
+Q
+L
+P
+X
+T
+D deleted: case 3b
+J
+K
+N O
+E
+B
+A
+U
+V
+Y
+Z
+C
+R
+S
+Q
+L
+P
+X
+T
+J
+K
+N O
+A
+U
+V
+Y
+Z
+C
+R
+S
+Q
+L
+P
+X
+T
+(f)
+B deleted: case 3a
+E
+(e′) tree shrinks
+in height
+Figure 18.8, continued
+(e) Deletion of D.
+This is case 3b: the recursion cannot descend to
+node CL because it has only 2 keys, so we push P down and merge it with CL and TX to form
+CLP TX; then we delete D from a leaf (case 1). (e0) After (e), we delete the root and the tree shrinks
+in height by one. (f) Deletion of B. This is case 3a: C moves to ﬁll B’s position and E moves to
+ﬁll C’s position.
+a. If the child y that precedes k in node x has at least t keys, then ﬁnd the
+predecessor k0 of k in the subtree rooted at y. Recursively delete k0, and
+replace k by k0 in x. (We can ﬁnd k0 and delete it in a single downward
+pass.)
+b. If y has fewer than t keys, then, symmetrically, examine the child ´ that
+follows k in node x. If ´ has at least t keys, then ﬁnd the successor k0 of k in
+the subtree rooted at ´. Recursively delete k0, and replace k by k0 in x. (We
+can ﬁnd k0 and delete it in a single downward pass.)
+c. Otherwise, if both y and ´ have only t  1 keys, merge k and all of ´ into y,
+so that x loses both k and the pointer to ´, and y now contains 2t  1 keys.
+Then free ´ and recursively delete k from y.
+3. If the key k is not present in internal node x, determine the root x:ci of the
+appropriate subtree that must contain k, if k is in the tree at all. If x:ci has
+only t 1 keys, execute step 3a or 3b as necessary to guarantee that we descend
+to a node containing at least t keys. Then ﬁnish by recursing on the appropriate
+child of x.
+
+a. If x:ci has only t  1 keys but has an immediate sibling with at least t keys,
+give x:ci an extra key by moving a key from x down into x:ci, moving a
+key from x:ci’s immediate left or right sibling up into x, and moving the
+appropriate child pointer from the sibling into x:ci.
+b. If x:ci and both of x:ci’s immediate siblings have t  1 keys, merge x:ci
+with one sibling, which involves moving a key from x down into the new
+merged node to become the median key for that node.
+Since most of the keys in a B-tree are in the leaves, we may expect that in
+practice, deletion operations are most often used to delete keys from leaves. The
+B-TREE-DELETE procedure then acts in one downward pass through the tree,
+without having to back up. When deleting a key in an internal node, however,
+the procedure makes a downward pass through the tree but may have to return to
+the node from which the key was deleted to replace the key with its predecessor or
+successor (cases 2a and 2b).
+Although this procedure seems complicated, it involves only O.h/ disk operations for a B-tree of height h, since only O.1/ calls to DISK-READ and DISKWRITE are made between recursive invocations of the procedure. The CPU time
+required is O.th/ D O.t logt n/.
+
+## Exercises
+
+18.3-1
+Show the results of deleting C, P , and V , in order, from the tree of Figure 18.8(f).
+18.3-2
+Write pseudocode for B-TREE-DELETE.
+
+## Problems
+
+18-1
+Stacks on secondary storage
+Consider implementing a stack in a computer that has a relatively small amount
+of fast primary memory and a relatively large amount of slower disk storage. The
+operations PUSH and POP work on single-word values. The stack we wish to
+support can grow to be much larger than can ﬁt in memory, and thus most of it
+must be stored on disk.
+A simple, but inefﬁcient, stack implementation keeps the entire stack on disk.
+We maintain in memory a stack pointer, which is the disk address of the top element
+on the stack. If the pointer has value p, the top element is the .p mod m/th word
+on page bp=mc of the disk, where m is the number of words per page.
+
+Problems for Chapter 18
+To implement the PUSH operation, we increment the stack pointer, read the appropriate page into memory from disk, copy the element to be pushed to the appropriate word on the page, and write the page back to disk. A POP operation is
+similar. We decrement the stack pointer, read in the appropriate page from disk,
+and return the top of the stack. We need not write back the page, since it was not
+modiﬁed.
+Because disk operations are relatively expensive, we count two costs for any
+implementation: the total number of disk accesses and the total CPU time. Any
+disk access to a page of m words incurs charges of one disk access and ‚.m/ CPU
+time.
+a. Asymptotically, what is the worst-case number of disk accesses for n stack
+operations using this simple implementation? What is the CPU time for n stack
+operations? (Express your answer in terms of m and n for this and subsequent
+parts.)
+Now consider a stack implementation in which we keep one page of the stack in
+memory. (We also maintain a small amount of memory to keep track of which page
+is currently in memory.) We can perform a stack operation only if the relevant disk
+page resides in memory. If necessary, we can write the page currently in memory
+to the disk and read in the new page from the disk to memory. If the relevant disk
+page is already in memory, then no disk accesses are required.
+b. What is the worst-case number of disk accesses required for n PUSH operations? What is the CPU time?
+c. What is the worst-case number of disk accesses required for n stack operations?
+What is the CPU time?
+Suppose that we now implement the stack by keeping two pages in memory (in
+addition to a small number of words for bookkeeping).
+d. Describe how to manage the stack pages so that the amortized number of disk
+accesses for any stack operation is O.1=m/ and the amortized CPU time for
+any stack operation is O.1/.
+18-2
+Joining and splitting 2-3-4 trees
+The join operation takes two dynamic sets S 0 and S 00 and an element x such that
+for any x0 2 S 0 and x00 2 S 00, we have x0:key < x:key < x00:key. It returns a set
+S D S 0 [ fxg [ S 00. The split operation is like an “inverse” join: given a dynamic
+set S and an element x 2 S, it creates a set S0 that consists of all elements in
+S  fxg whose keys are less than x:key and a set S 00 that consists of all elements
+in S  fxg whose keys are greater than x:key. In this problem, we investigate
+
+how to implement these operations on 2-3-4 trees. We assume for convenience that
+elements consist only of keys and that all key values are distinct.
+a. Show how to maintain, for every node x of a 2-3-4 tree, the height of the subtree
+rooted at x as an attribute x:height. Make sure that your implementation does
+not affect the asymptotic running times of searching, insertion, and deletion.
+b. Show how to implement the join operation. Given two 2-3-4 trees T 0 and T 00
+and a key k, the join operation should run in O.1 C jh0  h00j/ time, where h0
+and h00 are the heights of T 0 and T 00, respectively.
+c. Consider the simple path p from the root of a 2-3-4 tree T to a given key k,
+the set S 0 of keys in T that are less than k, and the set S 00 of keys in T that are
+greater than k. Show that p breaks S 0 into a set of trees fT 0
+0; T 0
+1; : : : ; T 0
+mg and a
+set of keys fk0
+1; k0
+2; : : : ; k0
+mg, where, for i D 1; 2; : : : ; m, we have y < k0
+i < ´
+for any keys y 2 T 0
+i1 and ´ 2 T 0
+i . What is the relationship between the heights
+of T 0
+i1 and T 0
+i ? Describe how p breaks S 00 into sets of trees and keys.
+d. Show how to implement the split operation on T . Use the join operation to
+assemble the keys in S 0 into a single 2-3-4 tree T 0 and the keys in S 00 into a
+single 2-3-4 tree T 00. The running time of the split operation should be O.lg n/,
+where n is the number of keys in T . (Hint: The costs for joining should telescope.)
+Chapter notes
+Knuth [211], Aho, Hopcroft, and Ullman [5], and Sedgewick [306] give further
+discussions of balanced-tree schemes and B-trees. Comer [74] provides a comprehensive survey of B-trees. Guibas and Sedgewick [155] discuss the relationships
+among various kinds of balanced-tree schemes, including red-black trees and 2-3-4
+trees.
+In 1970, J. E. Hopcroft invented 2-3 trees, a precursor to B-trees and 2-3-4
+trees, in which every internal node has either two or three children. Bayer and
+McCreight [35] introduced B-trees in 1972; they did not explain their choice of
+name.
+Bender, Demaine, and Farach-Colton [40] studied how to make B-trees perform
+well in the presence of memory-hierarchy effects. Their cache-oblivious algorithms work efﬁciently without explicitly knowing the data transfer sizes within
+the memory hierarchy.

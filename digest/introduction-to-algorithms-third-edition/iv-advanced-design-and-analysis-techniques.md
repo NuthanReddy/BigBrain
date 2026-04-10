@@ -1,0 +1,42 @@
+# IV Advanced Design and Analysis Techniques
+
+IV
+Advanced Design and Analysis Techniques
+
+Introduction
+This part covers three important techniques used in designing and analyzing efﬁcient algorithms: dynamic programming (Chapter 15), greedy algorithms (Chapter 16), and amortized analysis (Chapter 17). Earlier parts have presented other
+widely applicable techniques, such as divide-and-conquer, randomization, and how
+to solve recurrences. The techniques in this part are somewhat more sophisticated,
+but they help us to attack many computational problems. The themes introduced in
+this part will recur later in this book.
+Dynamic programming typically applies to optimization problems in which we
+make a set of choices in order to arrive at an optimal solution.
+As we make
+each choice, subproblems of the same form often arise. Dynamic programming
+is effective when a given subproblem may arise from more than one partial set of
+choices; the key technique is to store the solution to each such subproblem in case it
+should reappear. Chapter 15 shows how this simple idea can sometimes transform
+exponential-time algorithms into polynomial-time algorithms.
+Like dynamic-programming algorithms, greedy algorithms typically apply to
+optimization problems in which we make a set of choices in order to arrive at an
+optimal solution. The idea of a greedy algorithm is to make each choice in a locally
+optimal manner. A simple example is coin-changing: to minimize the number of
+U.S. coins needed to make change for a given amount, we can repeatedly select
+the largest-denomination coin that is not larger than the amount that remains. A
+greedy approach provides an optimal solution for many such problems much more
+quickly than would a dynamic-programming approach. We cannot always easily
+tell whether a greedy approach will be effective, however. Chapter 16 introduces
+
+Part IV
+Advanced Design and Analysis Techniques
+matroid theory, which provides a mathematical basis that can help us to show that
+a greedy algorithm yields an optimal solution.
+We use amortized analysis to analyze certain algorithms that perform a sequence
+of similar operations. Instead of bounding the cost of the sequence of operations
+by bounding the actual cost of each operation separately, an amortized analysis
+provides a bound on the actual cost of the entire sequence. One advantage of this
+approach is that although some operations might be expensive, many others might
+be cheap. In other words, many of the operations might run in well under the worstcase time. Amortized analysis is not just an analysis tool, however; it is also a way
+of thinking about the design of algorithms, since the design of an algorithm and the
+analysis of its running time are often closely intertwined. Chapter 17 introduces
+three ways to perform an amortized analysis of an algorithm.

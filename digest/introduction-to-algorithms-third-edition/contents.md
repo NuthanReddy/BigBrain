@@ -1,167 +1,458 @@
 # Contents
 
-```markdown
-# Comprehensive Study Notes on "Introduction to Algorithms, Third Edition"
+Contents
+Preface
+xiii
+I
+Foundations
+Introduction
+The Role of Algorithms in Computing
 
-## Overview
-"Introduction to Algorithms, Third Edition" is a definitive reference book in the field of algorithms and data structures, commonly referred to as CLRS (due to its authors: Cormen, Leiserson, Rivest, and Stein). It provides a thorough exploration of foundational and advanced topics in algorithms, data structures, and computational theory, with a balance of theoretical rigor and practical implementation details.
+## 1.1 Algorithms
 
-This study guide is structured to reflect the richness of the content in the book, covering **Key Concepts**, **Algorithms and Techniques**, **Complexity Analysis**, and **Data Structures**. Each topic is broken into subsections for clarity, and concrete examples are included wherever applicable to ensure ease of reference and understanding.
+## 1.2 Algorithms as a technology
 
----
+Getting Started
 
-## Key Concepts
+## 2.1 Insertion sort
 
-- **Algorithms**:
-  - Defined as a finite sequence of well-defined instructions used to solve problems or perform tasks in a computational setup.
-  - Core to computational problem-solving.
-  - Central theme: correctness, efficiency (time/space complexity), and real-world applicability.
+## 2.2 Analyzing algorithms
 
-- **Analyzing Algorithms**:
-  - Asymptotic analysis (Big-O, Θ, Ω) helps understand runtime and scalability under large input sizes.
-  - Recursion and divide-and-conquer techniques are critical for breaking down complex problems.
+## 2.3 Designing algorithms
 
-- **Data Structures**:
-  - Essential building blocks to organize and manipulate data efficiently.
-  - Arrays, linked lists, stacks, queues, trees, heaps, hash tables, and graphs are extensively covered.
+Growth of Functions
 
-- **Algorithm Design Techniques**:
-  - Greedy algorithms, dynamic programming, and divide-and-conquer are primary approaches.
-  - Selection of the right design paradigm for the problem is integral to solve it optimally.
+## 3.1 Asymptotic notation
 
-- **Probabilistic and Randomized Algorithms**:
-  - Introduced as tools to solve problems efficiently where deterministic approaches are costly.
+## 3.2 Standard notations and common functions
 
-- **Graph Algorithms**:
-  - A central area with applications in pathfinding, connectivity, and optimization.
-  - Includes foundational algorithms like BFS, DFS, Dijkstra's, and Kruskal's.
+Divide-and-Conquer
 
-- **NP-Completeness and Approximation**:
-  - Key theoretical topics providing insight into computational limits.
-  - Deals with the classification of problems based on difficulty and approaches to approximate hard problems.
+## 4.1 The maximum-subarray problem
 
----
+## 4.2 Strassen’s algorithm for matrix multiplication
 
-## Algorithms and Techniques
+## 4.3 The substitution method for solving recurrences
 
-### Insertion Sort
-- **How It Works**:
-  - Maintains a growing subarray that is always sorted by repeatedly "inserting" elements from the unsorted portion into the correct position.
-- **Pseudocode**:
-  ```text
-  INSERTION-SORT(A)
-  for j = 2 to A.length
-      key = A[j]
-      i = j - 1
-      while i > 0 and A[i] > key
-          A[i + 1] = A[i]
-          i = i - 1
-      A[i + 1] = key
-  ```
-- **Complexity**:
-  | Case      | Time Complexity |
-  |-----------|-----------------|
-  | Worst     | O(n²)           |
-  | Average   | O(n²)           |
-  | Best      | O(n) (when nearly sorted) |
-  - Space complexity: O(1) (in-place).
+## 4.4 The recursion-tree method for solving recurrences
 
-- **Example**:
-  For input array `[5, 2, 4, 6, 1, 3]`, the algorithm iteratively builds a sorted array: `[2, 5, 4, 6, 1, 3]`, `[2, 4, 5, 6, 1, 3]`, and so on.
+## 4.5 The master method for solving recurrences
 
----
+?
 
-### Merge Sort
-- **How It Works**:
-  - A divide-and-conquer algorithm that splits the array, recursively sorts the subarrays, and merges them.
-- **Pseudocode**:
-  ```text
-  MERGE-SORT(A, p, r)
-  if p < r
-      q = floor((p+r)/2)
-      MERGE-SORT(A, p, q)
-      MERGE-SORT(A, q+1, r)
-      MERGE(A, p, q, r)
-  ```
-  - `MERGE(A, p, q, r)` handles merging sorted subarrays.
-- **Complexity**:
-  | Case | Time Complexity | 
-  |------|-----------------|
-  | All  | O(n log n)      |
-  - Space complexity: O(n) (extra array for merging).
+## 4.6 Proof of the master theorem
 
-- **Example**:
-  To sort `[38, 27, 43, 3, 9, 82, 10]`, the array splits repeatedly, then merges to `[3, 9, 10, 27, 38, 43, 82]`.
+Probabilistic Analysis and Randomized Algorithms
 
----
+## 5.1 The hiring problem
 
-### Quicksort
-- **How It Works**:
-  - Selects a pivot element, partitions the array so elements <= pivot are on the left, and > pivot on the right, then recursively sorts subarrays.
+## 5.2 Indicator random variables
 
-- **Pseudocode**:
-  ```text
-  QUICKSORT(A, p, r)
-  if p < r
-      q = PARTITION(A, p, r)
-      QUICKSORT(A, p, q - 1)
-      QUICKSORT(A, q + 1, r)
-  ```
-- **Complexity**:
-  | Case      | Time Complexity |
-  |-----------|-----------------|
-  | Worst     | O(n²) (rare, when input is sorted) |
-  | Average   | O(n log n)      |
-  | Best      | O(n log n)      |
-- **Space Complexity**: O(log n) (due to recursion stack).
+## 5.3 Randomized algorithms
 
-- **Example**:
-  Sorting `[4, 2, 7, 3, 1]` with pivot `3` gives `[2, 1, 3, 4, 7]` after the partition step.
+?
 
----
+## 5.4 Probabilistic analysis and further uses of indicator random variables
 
-## Complexity Analysis Table
+vi
+Contents
+II
+Sorting and Order Statistics
+Introduction
+Heapsort
 
-### Sorting Algorithms
+## 6.1 Heaps
 
-| Algorithm       | Best Case        | Average Case     | Worst Case      | Space Complexity |
-|-----------------|------------------|------------------|-----------------|------------------|
-| Insertion Sort  | O(n)            | O(n²)           | O(n²)          | O(1)            |
-| Merge Sort      | O(n log n)      | O(n log n)      | O(n log n)     | O(n)            |
-| Quicksort       | O(n log n)      | O(n log n)      | O(n²)          | O(log n)        |
+## 6.2 Maintaining the heap property
 
----
+## 6.3 Building a heap
 
-## Data Structures
+## 6.4 The heapsort algorithm
 
-### Hash Tables
-- **Key Operations**:
-  - Insertion, Deletion, Search.
-  - Hash functions map keys to indices.
-- **Complexities**:
-  | Operation       | Average Time | Worst Time       |
-  |-----------------|--------------|------------------|
-  | Insertion       | O(1)         | O(n) (many collisions) |
-  | Deletion        | O(1)         | O(n)             |
-  | Search          | O(1)         | O(n)             |
-  
-- **Applications**:
-  - Efficient search implementations (e.g. dictionaries).
-  
-### Binary Search Trees (BSTs)
-- **Key Operations**:
-  - Insertion, Deletion, Search, Minimum, Maximum.
-  - Maintains an ordering such that for any node `n`, all left-descendants are smaller, and right-descendants are larger.
-- **Complexities**:
-  | Operation       | Best Case  | Average Case | Worst Case |
-  |-----------------|------------|--------------|------------|
-  | Search          | O(log n)  | O(log n)    | O(n)       |
-  | Insertion       | O(log n)  | O(log n)    | O(n)       |
-  | Deletion        | O(log n)  | O(log n)    | O(n)       |
-- **Example**:
-  For a BST built from `[15, 6, 18, 3, 7, 17, 20]`: the root is `15`, the left subtree contains `[6, 3, 7]`, and the right subtree `[18, 17, 20]`.
+## 6.5 Priority queues
 
----
+Quicksort
 
-This document will continuously expand with more detailed pseudocode, examples, and advanced topics as needed.
-```
+## 7.1 Description of quicksort
+
+## 7.2 Performance of quicksort
+
+## 7.3 A randomized version of quicksort
+
+## 7.4 Analysis of quicksort
+
+Sorting in Linear Time
+
+## 8.1 Lower bounds for sorting
+
+## 8.2 Counting sort
+
+## 8.3 Radix sort
+
+## 8.4 Bucket sort
+
+Medians and Order Statistics
+
+## 9.1 Minimum and maximum
+
+## 9.2 Selection in expected linear time
+
+## 9.3 Selection in worst-case linear time
+
+III
+Data Structures
+Introduction
+Elementary Data Structures
+
+## 10.1 Stacks and queues
+
+## 10.2 Linked lists
+
+## 10.3 Implementing pointers and objects
+
+## 10.4 Representing rooted trees
+
+Hash Tables
+
+## 11.1 Direct-address tables
+
+## 11.2 Hash tables
+
+## 11.3 Hash functions
+
+## 11.4 Open addressing
+
+?
+
+## 11.5 Perfect hashing
+
+Contents
+vii
+Binary Search Trees
+
+## 12.1 What is a binary search tree?
+
+## 12.2 Querying a binary search tree
+
+## 12.3 Insertion and deletion
+
+?
+
+## 12.4 Randomly built binary search trees
+
+Red-Black Trees
+
+## 13.1 Properties of red-black trees
+
+## 13.2 Rotations
+
+## 13.3 Insertion
+
+## 13.4 Deletion
+
+Augmenting Data Structures
+
+## 14.1 Dynamic order statistics
+
+## 14.2 How to augment a data structure
+
+## 14.3 Interval trees
+
+IV
+Advanced Design and Analysis Techniques
+Introduction
+Dynamic Programming
+
+## 15.1 Rod cutting
+
+## 15.2 Matrix-chain multiplication
+
+## 15.3 Elements of dynamic programming
+
+## 15.4 Longest common subsequence
+
+## 15.5 Optimal binary search trees
+
+Greedy Algorithms
+
+## 16.1 An activity-selection problem
+
+## 16.2 Elements of the greedy strategy
+
+## 16.3 Huffman codes
+
+?
+
+## 16.4 Matroids and greedy methods
+
+?
+
+## 16.5 A task-scheduling problem as a matroid
+
+Amortized Analysis
+
+## 17.1 Aggregate analysis
+
+## 17.2 The accounting method
+
+## 17.3 The potential method
+
+## 17.4 Dynamic tables
+
+viii
+Contents
+V
+Advanced Data Structures
+Introduction
+B-Trees
+
+## 18.1 Deﬁnition of B-trees
+
+## 18.2 Basic operations on B-trees
+
+## 18.3 Deleting a key from a B-tree
+
+Fibonacci Heaps
+
+## 19.1 Structure of Fibonacci heaps
+
+## 19.2 Mergeable-heap operations
+
+## 19.3 Decreasing a key and deleting a node
+
+## 19.4 Bounding the maximum degree
+
+van Emde Boas Trees
+
+## 20.1 Preliminary approaches
+
+## 20.2 A recursive structure
+
+## 20.3 The van Emde Boas tree
+
+Data Structures for Disjoint Sets
+
+## 21.1 Disjoint-set operations
+
+## 21.2 Linked-list representation of disjoint sets
+
+## 21.3 Disjoint-set forests
+
+?
+
+## 21.4 Analysis of union by rank with path compression
+
+VI
+Graph Algorithms
+Introduction
+Elementary Graph Algorithms
+
+## 22.1 Representations of graphs
+
+## 22.2 Breadth-ﬁrst search
+
+## 22.3 Depth-ﬁrst search
+
+## 22.4 Topological sort
+
+## 22.5 Strongly connected components
+
+Minimum Spanning Trees
+
+## 23.1 Growing a minimum spanning tree
+
+## 23.2 The algorithms of Kruskal and Prim
+
+Contents
+ix
+Single-Source Shortest Paths
+
+## 24.1 The Bellman-Ford algorithm
+
+## 24.2 Single-source shortest paths in directed acyclic graphs
+
+## 24.3 Dijkstra’s algorithm
+
+## 24.4 Difference constraints and shortest paths
+
+## 24.5 Proofs of shortest-paths properties
+
+All-Pairs Shortest Paths
+
+## 25.1 Shortest paths and matrix multiplication
+
+## 25.2 The Floyd-Warshall algorithm
+
+## 25.3 Johnson’s algorithm for sparse graphs
+
+Maximum Flow
+
+## 26.1 Flow networks
+
+## 26.2 The Ford-Fulkerson method
+
+## 26.3 Maximum bipartite matching
+
+?
+
+## 26.4 Push-relabel algorithms
+
+?
+
+## 26.5 The relabel-to-front algorithm
+
+VII
+Selected Topics
+Introduction
+Multithreaded Algorithms
+
+## 27.1 The basics of dynamic multithreading
+
+## 27.2 Multithreaded matrix multiplication
+
+## 27.3 Multithreaded merge sort
+
+Matrix Operations
+
+## 28.1 Solving systems of linear equations
+
+## 28.2 Inverting matrices
+
+## 28.3 Symmetric positive-deﬁnite matrices and least-squares approximation
+
+Linear Programming
+
+## 29.1 Standard and slack forms
+
+## 29.2 Formulating problems as linear programs
+
+## 29.3 The simplex algorithm
+
+## 29.4 Duality
+
+## 29.5 The initial basic feasible solution
+
+x
+Contents
+Polynomials and the FFT
+
+## 30.1 Representing polynomials
+
+## 30.2 The DFT and FFT
+
+## 30.3 Efﬁcient FFT implementations
+
+Number-Theoretic Algorithms
+
+## 31.1 Elementary number-theoretic notions
+
+## 31.2 Greatest common divisor
+
+## 31.3 Modular arithmetic
+
+## 31.4 Solving modular linear equations
+
+## 31.5 The Chinese remainder theorem
+
+## 31.6 Powers of an element
+
+## 31.7 The RSA public-key cryptosystem
+
+?
+
+## 31.8 Primality testing
+
+?
+
+## 31.9 Integer factorization
+
+String Matching
+
+## 32.1 The naive string-matching algorithm
+
+## 32.2 The Rabin-Karp algorithm
+
+## 32.3 String matching with ﬁnite automata
+
+?
+
+## 32.4 The Knuth-Morris-Pratt algorithm
+
+Computational Geometry
+
+## 33.1 Line-segment properties
+
+## 33.2 Determining whether any pair of segments intersects
+
+## 33.3 Finding the convex hull
+
+## 33.4 Finding the closest pair of points
+
+NP-Completeness
+
+## 34.1 Polynomial time
+
+## 34.2 Polynomial-time veriﬁcation
+
+## 34.3 NP-completeness and reducibility
+
+## 34.4 NP-completeness proofs
+
+## 34.5 NP-complete problems
+
+Approximation Algorithms
+
+## 35.1 The vertex-cover problem
+
+## 35.2 The traveling-salesman problem
+
+## 35.3 The set-covering problem
+
+## 35.4 Randomization and linear programming
+
+## 35.5 The subset-sum problem
+
+Contents
+xi
+VIII
+Appendix: Mathematical Background
+Introduction
+A
+Summations
+A.1
+Summation formulas and properties
+A.2
+Bounding summations
+B
+Sets, Etc.
+B.1
+Sets
+B.2
+Relations
+B.3
+Functions
+B.4
+Graphs
+B.5
+Trees
+C
+Counting and Probability
+C.1
+Counting
+C.2
+Probability
+C.3
+Discrete random variables
+C.4
+The geometric and binomial distributions
+?
+C.5
+The tails of the binomial distribution
+D
+Matrices
+D.1
+Matrices and matrix operations
+D.2
+Basic matrix properties
+Bibliography
+Index
