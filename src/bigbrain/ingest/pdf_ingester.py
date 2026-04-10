@@ -2,7 +2,8 @@
 
 Supports three extraction modes controlled by ``pdf_mode`` in config or CLI:
 
-- ``standard`` – PyMuPDF (primary) or pypdf (fallback).  Fast, lightweight.
+- ``standard`` – PyMuPDF text extraction + Tesseract OCR for scanned pages.
+  Pages with little/no embedded text are rendered to images and OCR'd.
 - ``high_fidelity`` – marker-pdf.  Markdown output with LaTeX math, tables,
   figures.  Requires ``pip install 'bigbrain[marker]'``.
 - ``max_accuracy`` – chandra-ocr.  Highest benchmark scores for math/tables.
@@ -11,6 +12,7 @@ Supports three extraction modes controlled by ``pdf_mode`` in config or CLI:
 
 from __future__ import annotations
 
+import io
 import re
 from datetime import datetime
 from pathlib import Path
@@ -29,8 +31,27 @@ VALID_PDF_MODES = ("standard", "high_fidelity", "max_accuracy")
 _JUNK_LINE_RE = re.compile(r"^[\s\W]{4,}$")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
+# Pages with fewer than this many non-whitespace chars trigger OCR
+_OCR_MIN_CHARS = 20
+
 # Runtime pdf_mode — set by ingest_path() from config/CLI before calling ingest()
 _active_pdf_mode: str = "standard"
+
+# Lazy-cached Tesseract availability check
+_tesseract_available: bool | None = None
+
+
+def _is_tesseract_available() -> bool:
+    """Check whether pytesseract + Tesseract binary are usable."""
+    global _tesseract_available
+    if _tesseract_available is None:
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            _tesseract_available = True
+        except Exception:
+            _tesseract_available = False
+    return _tesseract_available
 
 
 def set_active_pdf_mode(mode: str) -> None:
@@ -141,6 +162,7 @@ class PdfIngester(BaseIngester):
 
         pages: list[DocumentSection] = []
         all_text_parts: list[str] = []
+        ocr_pages = 0
 
         for i, page in enumerate(doc):
             try:
@@ -150,11 +172,22 @@ class PdfIngester(BaseIngester):
                 logger.warning("Failed to extract page %d of %s: %s", i + 1, path, exc)
                 text = ""
 
+            # OCR fallback: if embedded text is sparse, render page and OCR
+            if len(text.replace(" ", "").replace("\n", "")) < _OCR_MIN_CHARS:
+                ocr_text = self._ocr_page(page, i + 1, path)
+                if ocr_text:
+                    text = ocr_text
+                    ocr_pages += 1
+
+            meta: dict = {"page_number": i + 1}
+            if ocr_pages and len(text.replace(" ", "").replace("\n", "")) >= _OCR_MIN_CHARS:
+                meta["ocr"] = True
+
             pages.append(DocumentSection(
                 title=f"Page {i + 1}",
                 content=text,
                 level=i + 1,
-                metadata={"page_number": i + 1},
+                metadata=meta,
             ))
             if text.strip():
                 all_text_parts.append(text)
@@ -167,6 +200,10 @@ class PdfIngester(BaseIngester):
         title = pdf_meta.get("pdf_title", "") or path.stem.replace("_", " ").replace("-", " ").title()
         stat = path.stat()
 
+        extra = {**pdf_meta, "pdf_mode": "standard"}
+        if ocr_pages:
+            extra["ocr_pages"] = str(ocr_pages)
+
         return Document(
             title=title,
             content=content,
@@ -176,11 +213,11 @@ class PdfIngester(BaseIngester):
                 source_type="pdf",
                 modified_at=datetime.fromtimestamp(stat.st_mtime),
                 size_bytes=stat.st_size,
-                extra={**pdf_meta, "pdf_mode": "standard"},
+                extra=extra,
             ),
             language="",
             sections=pages,
-            metadata={"page_count": len(pages), **pdf_meta},
+            metadata={"page_count": len(pages), "ocr_pages": ocr_pages, **pdf_meta},
         )
 
     def _ingest_pypdf(self, path: Path) -> Document:
@@ -369,6 +406,31 @@ class PdfIngester(BaseIngester):
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _ocr_page(page: object, page_num: int, path: Path) -> str:
+        """Render a PyMuPDF page to image and run Tesseract OCR.
+
+        Returns the OCR text, or empty string if Tesseract is unavailable.
+        """
+        if not _is_tesseract_available():
+            return ""
+
+        try:
+            import pytesseract
+            from PIL import Image
+
+            # Render at 300 DPI for good OCR quality
+            pix = page.get_pixmap(dpi=300)  # type: ignore[union-attr]
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            text = pytesseract.image_to_string(img)
+            text = _clean_page_text(text)
+            if text:
+                logger.debug("OCR recovered %d chars on page %d of %s", len(text), page_num, path)
+            return text
+        except Exception as exc:
+            logger.warning("OCR failed on page %d of %s: %s", page_num, path, exc)
+            return ""
+
     @staticmethod
     def _extract_pdf_metadata(path: Path, *, doc: object | None = None) -> dict[str, str]:
         """Extract PDF metadata using PyMuPDF if available.
