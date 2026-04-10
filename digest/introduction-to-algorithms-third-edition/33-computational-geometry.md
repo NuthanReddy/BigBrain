@@ -1605,3 +1605,27 @@ The O.n lg n/-time divide-and-conquer algorithm for ﬁnding the closest pair of
 points is by Shamos and appears in Preparata and Shamos [282]. Preparata and
 Shamos also show that the algorithm is asymptotically optimal in a decision-tree
 model.
+
+## Figures
+
+![Page 1037 figure](images/33-computational-geometry/p1037_figure1.png)
+
+![Page 1038 figure](images/33-computational-geometry/p1038_figure2.png)
+
+![Page 1040 figure](images/33-computational-geometry/p1040_figure3.png)
+
+![Page 1044 figure](images/33-computational-geometry/p1044_figure4.png)
+
+![Page 1047 figure](images/33-computational-geometry/p1047_figure5.png)
+
+![Page 1050 figure](images/33-computational-geometry/p1050_figure6.png)
+
+![Page 1053 figure](images/33-computational-geometry/p1053_figure7.png)
+
+![Page 1054 figure](images/33-computational-geometry/p1054_figure8.png)
+
+![Page 1056 figure](images/33-computational-geometry/p1056_figure9.png)
+
+![Page 1058 figure](images/33-computational-geometry/p1058_figure10.png)
+
+![Page 1063 figure](images/33-computational-geometry/p1063_figure11.png)

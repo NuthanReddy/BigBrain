@@ -2918,3 +2918,25 @@ probabilities pi are 0 that uses O.n2/ time and O.n/ space; subsequently, Knuth
 [211] reduced the time to O.n lg n/.
 Problem 15-8 is due to Avidan and Shamir [27], who have posted on the Web a
 wonderful video illustrating this image-compression technique.
+
+## Figures
+
+![Page 382 figure](images/15-dynamic-programming/p382_figure1.png)
+
+![Page 385 figure](images/15-dynamic-programming/p385_figure2.png)
+
+![Page 388 figure](images/15-dynamic-programming/p388_figure3.png)
+
+![Page 397 figure](images/15-dynamic-programming/p397_figure4.png)
+
+![Page 403 figure](images/15-dynamic-programming/p403_figure5.png)
+
+![Page 406 figure](images/15-dynamic-programming/p406_figure6.png)
+
+![Page 416 figure](images/15-dynamic-programming/p416_figure7.png)
+
+![Page 419 figure](images/15-dynamic-programming/p419_figure8.png)
+
+![Page 424 figure](images/15-dynamic-programming/p424_figure9.png)
+
+![Page 426 figure](images/15-dynamic-programming/p426_figure10.png)

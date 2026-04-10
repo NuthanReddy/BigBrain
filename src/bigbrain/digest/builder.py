@@ -661,7 +661,6 @@ class DigestBuilder:
             return []
 
         total_pages = len(pdf_doc)
-        pdf_doc.close()
 
         # Build page_content from sections (fast — already extracted by ingester)
         page_content: dict[int, str] = {}
@@ -670,7 +669,7 @@ class DigestBuilder:
             if page_num and sec.content:
                 page_content[page_num] = sec.content
 
-        # Group into chapters using TOC page ranges
+        # Group into chapters using TOC page ranges + extract images
         chapters: list[tuple[str, str]] = []
         for i, (title, start_page) in enumerate(chapter_entries):
             end_page = chapter_entries[i + 1][1] if i + 1 < len(chapter_entries) else total_pages + 1
@@ -681,9 +680,64 @@ class DigestBuilder:
                 if content.strip():
                     parts.append(content)
 
-            if parts:
-                chapters.append((title, "\n\n".join(parts)))
+            if not parts:
+                continue
 
+            # Extract images: raster images + render pages with vector figures
+            chapter_slug = _slugify(title) or f"chapter-{len(chapters) + 1}"
+            img_dir = Path("digest") / "images" / chapter_slug
+            img_refs: list[str] = []
+            img_count = 0
+
+            for pg_idx in range(start_page - 1, min(end_page - 1, total_pages)):
+                try:
+                    page = pdf_doc[pg_idx]
+
+                    # Check for raster images
+                    for img_tuple in page.get_images(full=True):
+                        xref = img_tuple[0]
+                        width, height = img_tuple[2], img_tuple[3]
+                        if width < 50 or height < 50 or width <= 1 or height <= 1:
+                            continue
+                        try:
+                            img_data = pdf_doc.extract_image(xref)
+                            if len(img_data["image"]) < 500:
+                                continue
+                            img_dir.mkdir(parents=True, exist_ok=True)
+                            img_count += 1
+                            ext = img_data.get("ext", "png")
+                            img_name = f"p{pg_idx + 1}_img{img_count}.{ext}"
+                            (img_dir / img_name).write_bytes(img_data["image"])
+                            img_refs.append(
+                                f"![Figure (page {pg_idx + 1})](images/{chapter_slug}/{img_name})"
+                            )
+                        except Exception:
+                            continue
+
+                    # Render pages with vector drawings as page screenshots
+                    drawings = page.get_drawings()
+                    if len(drawings) > 10:  # significant vector content
+                        try:
+                            img_dir.mkdir(parents=True, exist_ok=True)
+                            img_count += 1
+                            pix = page.get_pixmap(dpi=150)
+                            img_name = f"p{pg_idx + 1}_figure{img_count}.png"
+                            pix.save(str(img_dir / img_name))
+                            img_refs.append(
+                                f"![Page {pg_idx + 1} figure](images/{chapter_slug}/{img_name})"
+                            )
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+
+            chapter_text = "\n\n".join(parts)
+            if img_refs:
+                chapter_text += "\n\n## Figures\n\n" + "\n\n".join(img_refs)
+
+            chapters.append((title, chapter_text))
+
+        pdf_doc.close()
         return chapters
 
     @staticmethod

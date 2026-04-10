@@ -787,3 +787,15 @@ that appear in the literature, citing work by H. Edelsbrunner (1980) and E. M.
 McCreight (1981). The book details an interval tree that, given a static database
 of n intervals, allows us to enumerate all k intervals that overlap a given query
 interval in O.k C lg n/ time.
+
+## Figures
+
+![Page 361 figure](images/14-augmenting-data-structures/p361_figure1.png)
+
+![Page 365 figure](images/14-augmenting-data-structures/p365_figure2.png)
+
+![Page 370 figure](images/14-augmenting-data-structures/p370_figure3.png)
+
+![Page 371 figure](images/14-augmenting-data-structures/p371_figure4.png)
+
+![Page 373 figure](images/14-augmenting-data-structures/p373_figure5.png)

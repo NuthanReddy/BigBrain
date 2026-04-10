@@ -661,3 +661,9 @@ Dor and Zwick have improved on both of these bounds. Their upper bound [93]
 is slightly less than 2:95n, and their lower bound [94] is .2 C /n, for a small
 positive constant , thereby improving slightly on related work by Dor et al. [92].
 Paterson [272] describes some of these results along with other related work.
+
+## Figures
+
+![Page 242 figure](images/9-medians-and-order-statistics/p242_figure1.png)
+
+![Page 245 figure](images/9-medians-and-order-statistics/p245_figure2.png)
