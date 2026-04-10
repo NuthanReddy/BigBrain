@@ -43,6 +43,20 @@ class LinkGraph:
         return sum(len(targets) for targets in self.edges.values())
 
 
+_MAX_AUTO_LINKS_PER_PAGE = 20
+
+
+def _is_inside_wikilink(content: str, pos: int) -> bool:
+    """Check if position is inside a [[...]] wikilink."""
+    open_pos = content.rfind("[[", 0, pos)
+    if open_pos == -1:
+        return False
+    close_pos = content.find("]]", open_pos)
+    if close_pos == -1:
+        return False
+    return open_pos < pos < close_pos + 2
+
+
 class WikiLinker:
     """Scans wiki pages and inserts cross-reference wikilinks."""
 
@@ -82,7 +96,10 @@ class WikiLinker:
         candidates = sorted(self._name_to_slug.items(), key=lambda x: -len(x[0]))
 
         content = page.content
+        auto_links = 0
         for name_lower, target_slug in candidates:
+            if auto_links >= _MAX_AUTO_LINKS_PER_PAGE:
+                break
             if target_slug == page.slug:
                 continue  # Don't self-link
             if target_slug in existing_slugs:
@@ -93,12 +110,15 @@ class WikiLinker:
             pattern = re.compile(r'\b' + re.escape(name_lower) + r'\b', re.IGNORECASE)
             match = pattern.search(content)
             if match:
+                if _is_inside_wikilink(content, match.start()):
+                    continue  # Skip — inside an existing wikilink
                 original_text = match.group(0)
                 wikilink = f"[[{target_slug}|{original_text}]]"
                 # Replace only the FIRST occurrence
                 content = content[:match.start()] + wikilink + content[match.end():]
                 graph.add_edge(page.slug, target_slug)
                 existing_slugs.add(target_slug)
+                auto_links += 1
 
         page.content = content
         page.related_pages = sorted(graph.get_outgoing(page.slug))
