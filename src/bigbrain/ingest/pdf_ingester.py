@@ -1,13 +1,11 @@
 """PDF file ingester with configurable backends.
 
-Supports three extraction modes controlled by ``pdf_mode`` in config or CLI:
+Supports two extraction modes controlled by ``pdf_mode`` in config or CLI:
 
 - ``standard`` – PyMuPDF text extraction with image-aware OCR.  Pages are
   classified as scanned, digital-with-figures, or pure-text.  Scanned pages
   get full-page OCR; figures in digital pages are individually extracted and
   OCR'd for axis labels, legends, and diagram text.
-- ``high_fidelity`` – marker-pdf.  Markdown output with LaTeX math, tables,
-  figures.  Requires ``pip install 'bigbrain[marker]'``.
 - ``max_accuracy`` – chandra-ocr.  Highest benchmark scores for math/tables.
   Requires ``pip install 'bigbrain[chandra]'``.
 """
@@ -28,7 +26,7 @@ from bigbrain.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-VALID_PDF_MODES = ("standard", "high_fidelity", "max_accuracy")
+VALID_PDF_MODES = ("standard", "max_accuracy")
 
 # Heuristic: lines made mostly of non-alphanumeric chars are likely
 # figure debris (card suits, box-drawing, stray symbols).
@@ -271,9 +269,7 @@ class PdfIngester(BaseIngester):
             raise FileAccessError(str(path), "file not found")
 
         mode = _active_pdf_mode
-        if mode == "high_fidelity":
-            return self._ingest_marker(path)
-        elif mode == "max_accuracy":
+        if mode == "max_accuracy":
             return self._ingest_chandra(path)
         else:
             return self._ingest_standard(path)
@@ -451,66 +447,6 @@ class PdfIngester(BaseIngester):
             language="",
             sections=pages,
             metadata={"page_count": len(pages), **pdf_meta},
-        )
-
-    # ------------------------------------------------------------------
-    # marker-pdf backend (high_fidelity)
-    # ------------------------------------------------------------------
-    def _ingest_marker(self, path: Path) -> Document:
-        """High-fidelity extraction using marker-pdf."""
-        try:
-            from marker.converters.pdf import PdfConverter
-            from marker.models import create_model_dict
-            from marker.output import text_from_rendered
-        except ImportError as exc:
-            raise UserError(
-                "marker-pdf is required for high_fidelity PDF mode but is not installed. "
-                "Install with: pip install 'bigbrain[marker]'"
-            ) from exc
-
-        try:
-            converter = PdfConverter(artifact_dict=create_model_dict())
-            rendered = converter(str(path))
-            markdown_text, _, images = text_from_rendered(rendered)
-        except Exception as exc:
-            raise FileAccessError(
-                str(path), f"marker-pdf extraction failed: {exc}"
-            ) from exc
-
-        if not markdown_text or not markdown_text.strip():
-            logger.warning("marker-pdf returned empty text for %s", path)
-            markdown_text = ""
-
-        sections = _split_markdown_sections(markdown_text)
-        pdf_meta = self._extract_pdf_metadata(path)
-
-        title = (
-            pdf_meta.get("pdf_title", "")
-            or path.stem.replace("_", " ").replace("-", " ").title()
-        )
-
-        stat = path.stat()
-        image_count = len(images) if images else 0
-
-        return Document(
-            title=title,
-            content=markdown_text,
-            source=SourceMetadata(
-                file_path=str(path),
-                file_extension=".pdf",
-                source_type="pdf",
-                modified_at=datetime.fromtimestamp(stat.st_mtime),
-                size_bytes=stat.st_size,
-                extra={**pdf_meta, "pdf_mode": "high_fidelity"},
-            ),
-            language="",
-            sections=sections,
-            metadata={
-                "page_count": len(sections) or 1,
-                "image_count": image_count,
-                "pdf_mode": "high_fidelity",
-                **pdf_meta,
-            },
         )
 
     # ------------------------------------------------------------------

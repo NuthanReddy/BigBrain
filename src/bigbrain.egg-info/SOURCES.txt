@@ -72,12 +72,21 @@ src/bigbrain/rag/prompts.py
 src/bigbrain/rag/retriever.py
 src/bigbrain/stores/__init__.py
 src/bigbrain/stores/base.py
+src/bigbrain/stores/factory.py
 src/bigbrain/stores/neo4j_backend.py
 src/bigbrain/stores/pinecone_backend.py
 src/bigbrain/stores/postgres.py
 src/bigbrain/stores/qdrant_backend.py
 src/bigbrain/stores/sqlite_backend.py
 src/bigbrain/stores/weaviate_backend.py
+src/bigbrain/wiki/__init__.py
+src/bigbrain/wiki/builder.py
+src/bigbrain/wiki/frontmatter.py
+src/bigbrain/wiki/generators.py
+src/bigbrain/wiki/linker.py
+src/bigbrain/wiki/models.py
+src/bigbrain/wiki/slugger.py
+src/bigbrain/wiki/writer.py
 tests/test_change_detector.py
 tests/test_compile.py
 tests/test_config.py
@@ -92,3 +101,5 @@ tests/test_plugins.py
 tests/test_providers.py
 tests/test_rag.py
 tests/test_stores.py
+tests/test_visual_content.py
+tests/test_wiki.py

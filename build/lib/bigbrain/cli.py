@@ -24,9 +24,61 @@ def _handle_ingest(args: argparse.Namespace) -> int:
 
     logger = get_logger(__name__)
 
+    # URL ingestion mode
+    if args.url:
+        from bigbrain.ingest.url_ingester import UrlIngester
+        print(f"Ingesting URL: {args.url}")
+        try:
+            ingester = UrlIngester()
+            doc = ingester.ingest(args.url)
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+        print(f"  Title: {doc.title}")
+        print(f"  Size: {doc.source.size_bytes:,} bytes")
+        if doc.sections:
+            print(f"  Sections: {len(doc.sections)}")
+
+        if not args.no_store:
+            from bigbrain.kb.store import KBStore
+            from bigbrain.config import load_config
+            cfg = load_config()
+            with KBStore(cfg.kb_db_path) as store:
+                store.save_document(doc)
+            print(f"  💾 Stored in knowledge base")
+
+        return 0
+
+    # API ingestion mode
+    if args.api:
+        from bigbrain.ingest.api_ingester import ApiIngester
+        print(f"Ingesting API: {args.api}")
+        try:
+            ingester = ApiIngester(auth_token=args.auth_token)
+            doc = ingester.ingest(args.api, json_path=args.json_path)
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+        print(f"  Title: {doc.title}")
+        print(f"  Size: {doc.source.size_bytes:,} bytes")
+        if doc.sections:
+            print(f"  Sections: {len(doc.sections)}")
+
+        if not args.no_store:
+            from bigbrain.kb.store import KBStore
+            from bigbrain.config import load_config
+            cfg = load_config()
+            with KBStore(cfg.kb_db_path) as store:
+                store.save_document(doc)
+            print(f"  💾 Stored in knowledge base")
+
+        return 0
+
     source = args.source
     if not source:
-        raise UserError("--source is required. Specify a file or directory to ingest.")
+        raise UserError("--source, --url, or --api is required. Specify a file, directory, URL, or API endpoint.")
 
     print(f"Ingesting from: {source}")
     print(f"  recursive: {args.recursive}")
@@ -39,6 +91,7 @@ def _handle_ingest(args: argparse.Namespace) -> int:
             recursive=args.recursive,
             file_type=args.type,
             skip_hidden=not args.include_hidden,
+            pdf_mode=getattr(args, 'pdf_mode', None),
         )
     except UserError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -105,18 +158,448 @@ def _handle_ingest(args: argparse.Namespace) -> int:
 
 
 def _handle_distill(args: argparse.Namespace) -> int:
-    print("⚠ 'distill' is not implemented yet. This command will be available in Phase 2.")
+    """Run the distillation pipeline on stored documents."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty (no database found).")
+        print("  Run 'bigbrain ingest --source <path>' first.")
+        return 1
+
+    from bigbrain.distill.pipeline import DistillPipeline
+    from bigbrain.errors import NoProviderAvailableError
+
+    workers = getattr(args, 'workers', 3)
+
+    try:
+        with DistillPipeline.from_config(cfg) as pipeline:
+            pipeline._workers = workers
+            if not pipeline._registry.has_providers():
+                print("No AI providers are enabled.")
+                print("  Enable a provider in config/example.yaml")
+                return 1
+
+            model = args.model if args.model else ""
+            force = getattr(args, 'force', False)
+            step_arg = getattr(args, 'step', '')
+            steps = {step_arg} if step_arg else None
+
+            if args.doc_id:
+                print(f"Distilling document: {args.doc_id}{f' (step: {step_arg})' if step_arg else ''}")
+                result = pipeline.distill_by_id(args.doc_id, model=model, force=force, steps=steps)
+                if result is None:
+                    print(f"Document not found: {args.doc_id}")
+                    return 1
+                _print_distill_result(result)
+            else:
+                source_type = args.type if args.type else None
+                mode = "force" if force else "incremental"
+                step_info = f", step: {step_arg}" if step_arg else ""
+                print(f"Distilling all documents ({mode}{step_info}){f' (type: {source_type})' if source_type else ''}...")
+                results = pipeline.distill_all(model=model, source_type=source_type, force=force, steps=steps)
+
+                total_summaries = sum(len(r.summaries) for r in results)
+                total_entities = sum(len(r.entities) for r in results)
+                total_relationships = sum(len(r.relationships) for r in results)
+                total_errors = sum(len(r.errors) for r in results)
+
+                print()
+                print(f"Distillation complete:")
+                print(f"  Documents:     {len(results)}")
+                print(f"  Summaries:     {total_summaries}")
+                print(f"  Entities:      {total_entities}")
+                print(f"  Relationships: {total_relationships}")
+                if total_errors > 0:
+                    print(f"  Errors:        {total_errors}")
+
+    except NoProviderAvailableError:
+        print("No AI provider is available. Check with: bigbrain providers")
+        return 1
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     return 0
+
+
+def _print_distill_result(result):
+    """Print a single distillation result."""
+    print()
+    print(f"Distillation complete:")
+    print(f"  Chunks:        {len(result.chunks)}")
+    print(f"  Summaries:     {len(result.summaries)}")
+    print(f"  Entities:      {len(result.entities)}")
+    print(f"  Relationships: {len(result.relationships)}")
+
+    if result.summaries:
+        print()
+        print("Summary:")
+        print(f"  {result.summaries[0].content[:500]}")
+
+    if result.entities:
+        print()
+        print(f"Entities ({len(result.entities)}):")
+        for e in result.entities[:15]:
+            print(f"  • {e.name} ({e.entity_type}): {e.description[:80]}")
+        if len(result.entities) > 15:
+            print(f"  ... and {len(result.entities) - 15} more")
+
+    if result.relationships:
+        print()
+        print(f"Relationships ({len(result.relationships)}):")
+        for r in result.relationships[:10]:
+            print(f"  • {r.relationship_type}: {r.description[:80]}")
+        if len(result.relationships) > 10:
+            print(f"  ... and {len(result.relationships) - 10} more")
+
+    if result.errors:
+        print()
+        print(f"Errors ({len(result.errors)}):")
+        for e in result.errors:
+            print(f"  ✗ {e}")
+
+    if result.provider:
+        print()
+        print(f"— {result.provider}/{result.model}")
 
 
 def _handle_compile(args: argparse.Namespace) -> int:
-    print("⚠ 'compile' is not implemented yet. This command will be available in Phase 3.")
+    """Compile distilled content into output formats."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        print("  Run 'bigbrain ingest' then 'bigbrain distill' first.")
+        return 1
+
+    from bigbrain.compile.pipeline import CompilePipeline
+
+    fmt = args.format
+    model = args.model if hasattr(args, 'model') and args.model else ""
+    output = getattr(args, 'output', '') or ''
+
+    try:
+        with CompilePipeline.from_config(cfg) as pipeline:
+            if args.doc_id:
+                print(f"Compiling {args.doc_id} as {fmt}...")
+                result = pipeline.compile_document(
+                    args.doc_id, format=fmt, model=model, output_path=output,
+                )
+                if result is None:
+                    print(f"Document not found: {args.doc_id}")
+                    return 1
+
+                out_path = result.metadata.get("output_path", output or "stdout")
+                print(f"✓ Compiled: {result.title}")
+                print(f"  Format: {fmt}")
+                print(f"  Output: {out_path}")
+                if result.flashcards:
+                    print(f"  Flashcards: {len(result.flashcards)}")
+                if result.qa_pairs:
+                    print(f"  Q&A pairs: {len(result.qa_pairs)}")
+                if result.generated_by_provider:
+                    print(f"  Provider: {result.generated_by_provider}/{result.generated_by_model}")
+            else:
+                source_type = args.type if hasattr(args, 'type') and args.type else None
+                print(f"Compiling all documents as {fmt}...")
+                compile_result = pipeline.compile_all(
+                    format=fmt, model=model, source_type=source_type,
+                )
+
+                print()
+                print(f"Compilation complete:")
+                print(f"  Documents: {compile_result.total_documents}")
+                print(f"  Outputs:   {len(compile_result.outputs)}")
+                if compile_result.errors:
+                    print(f"  Errors:    {len(compile_result.errors)}")
+
+                if compile_result.outputs:
+                    print()
+                    for out in compile_result.outputs:
+                        path = out.metadata.get("output_path", "")
+                        print(f"  ✓ {out.title}")
+                        if path:
+                            print(f"    → {path}")
+
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # Export to Notion if requested
+    to_notion = getattr(args, 'to_notion', False)
+    if to_notion:
+        return _compile_to_notion(cfg, fmt, args)
+
     return 0
+
+
+def _compile_to_notion(cfg, fmt: str, args) -> int:
+    """Write compiled output to Notion under Big Brain/<doc>/<format>."""
+    from bigbrain.notion.client import NotionClient
+    from bigbrain.notion.exporter import _paragraph, _heading, _bulleted, _divider
+    from bigbrain.kb.store import KBStore
+
+    client = NotionClient.from_config(cfg.notion)
+    if not client.is_available():
+        print("Notion is not available. Check BIGBRAIN_NOTION_TOKEN.")
+        return 1
+
+    store = KBStore(cfg.kb_db_path)
+
+    # Find or create "Big Brain" root page
+    notion_parent = getattr(args, 'notion_parent', '') or ''
+    if not notion_parent:
+        pages = client.search_pages("Big Brain", page_size=5)
+        bb_page = None
+        for p in pages:
+            if client.get_page_title(p).strip() == "Big Brain":
+                bb_page = p
+                break
+
+        if bb_page:
+            bb_id = bb_page["id"]
+            print(f"Found 'Big Brain' page: {bb_id[:12]}")
+        else:
+            all_pages = client.search_pages("", page_size=1)
+            if not all_pages:
+                print("No pages found in Notion workspace.")
+                store.close()
+                return 1
+            root_parent = all_pages[0].get("parent", {})
+            root_id = root_parent.get("page_id", all_pages[0]["id"]) if root_parent.get("type") == "page_id" else all_pages[0]["id"]
+
+            print("Creating 'Big Brain' page...")
+            page = client.create_page(root_id, "Big Brain", children=[
+                _paragraph("BigBrain knowledge base — compiled study materials."),
+            ])
+            bb_id = page["id"]
+            print(f"  Created: {bb_id[:12]}")
+    else:
+        bb_id = notion_parent
+
+    doc_id_filter = getattr(args, 'doc_id', '') or ''
+    if doc_id_filter:
+        docs = [store.get_document(doc_id_filter)]
+        docs = [d for d in docs if d is not None]
+    else:
+        source_type = getattr(args, 'type', '') or None
+        docs = store.list_documents(source_type=source_type, limit=100)
+
+    for doc in docs:
+        print(f"\n  {doc.title}")
+
+        # Find or create doc page under Big Brain
+        doc_pages = client.search_pages(doc.title, page_size=3)
+        doc_page_id = None
+        for dp in doc_pages:
+            if client.get_page_title(dp).strip() == doc.title:
+                dp_parent = dp.get("parent", {})
+                if dp_parent.get("page_id") == bb_id:
+                    doc_page_id = dp["id"]
+                    break
+
+        if not doc_page_id:
+            dp = client.create_page(bb_id, doc.title, children=[
+                _paragraph(f"Source: {doc.source.file_path if doc.source else 'unknown'}"),
+            ])
+            doc_page_id = dp["id"]
+            print(f"    Created doc page: {doc_page_id[:12]}")
+
+        entities = store.get_entities(doc.id)
+        relationships = store.get_relationships(doc.id)
+        summaries = store.get_summaries(doc.id)
+
+        if not entities and not summaries:
+            print("    No distilled content — skipping")
+            continue
+
+        blocks = _build_notion_blocks(fmt, doc, entities, relationships, summaries)
+        if not blocks:
+            print("    No content to write")
+            continue
+
+        format_title = fmt.replace("_", " ").title()
+
+        # Find existing format page under doc page
+        existing_fmt_id = None
+        try:
+            child_blocks = client.get_page_blocks(doc_page_id)
+            for cb in child_blocks:
+                if cb.get("type") == "child_page":
+                    child_title = cb.get("child_page", {}).get("title", "")
+                    if child_title == format_title:
+                        existing_fmt_id = cb["id"]
+                        break
+        except Exception:
+            pass
+
+        batch_size = 100
+
+        if existing_fmt_id:
+            # Update existing page — clear old blocks, append new
+            client.update_page_blocks(existing_fmt_id, blocks[:batch_size])
+            remaining_blocks = blocks[batch_size:]
+            while remaining_blocks:
+                batch = remaining_blocks[:batch_size]
+                remaining_blocks = remaining_blocks[batch_size:]
+                client._client.blocks.children.append(block_id=existing_fmt_id, children=batch)
+            fmt_page_id = existing_fmt_id
+            print(f"    \u2713 {format_title}: updated {fmt_page_id[:12]} ({len(blocks)} blocks)")
+        else:
+            # Create new page
+            first_batch = blocks[:batch_size]
+            remaining_blocks = blocks[batch_size:]
+            fmt_page = client.create_page(doc_page_id, format_title, children=first_batch)
+            fmt_page_id = fmt_page["id"]
+            while remaining_blocks:
+                batch = remaining_blocks[:batch_size]
+                remaining_blocks = remaining_blocks[batch_size:]
+                client._client.blocks.children.append(block_id=fmt_page_id, children=batch)
+            print(f"    \u2713 {format_title}: created {fmt_page_id[:12]} ({len(blocks)} blocks)")
+
+        print(f"    \u2713 {format_title}: {fmt_page_id[:12]} ({len(blocks)} blocks)")
+
+    store.close()
+    print("\nNotion export complete!")
+    return 0
+
+
+def _build_notion_blocks(fmt, doc, entities, relationships, summaries):
+    """Build Notion blocks for a given compile format."""
+    from bigbrain.notion.exporter import _paragraph, _heading, _bulleted, _divider
+    blocks = []
+
+    if fmt == "cheatsheet":
+        by_type = {}
+        for e in entities:
+            by_type.setdefault(e.entity_type, []).append(e)
+        for etype, ents in sorted(by_type.items()):
+            blocks.append(_heading(etype.replace("_", " ").title(), level=2))
+            for e in sorted(ents, key=lambda x: x.name)[:30]:
+                desc = f" \u2014 {e.description}" if e.description else ""
+                blocks.append(_bulleted((e.name + desc)[:1900]))
+        if relationships:
+            entity_map = {e.id: e.name for e in entities}
+            blocks.append(_divider())
+            blocks.append(_heading("Relationships", level=2))
+            for r in relationships[:30]:
+                src = entity_map.get(r.source_entity_id, "?")
+                tgt = entity_map.get(r.target_entity_id, "?")
+                blocks.append(_bulleted(f"{src} \u2192 {r.relationship_type} \u2192 {tgt}"))
+        # Add Mermaid diagram if we have relationships
+        if relationships and entities:
+            from bigbrain.compile.diagrams import generate_flowchart
+            from bigbrain.notion.exporter import _code_block, _callout
+            mermaid = generate_flowchart(entities, relationships)
+            if mermaid:
+                blocks.append(_heading("Concept Map", level=2))
+                blocks.append(_code_block(mermaid, "mermaid"))
+
+    elif fmt == "markdown":
+        if summaries:
+            blocks.append(_heading("Summary", level=2))
+            for s in summaries:
+                for para in s.content.split("\n\n"):
+                    if para.strip():
+                        blocks.append(_paragraph(para.strip()[:1900]))
+        if entities:
+            blocks.append(_heading("Key Concepts", level=2))
+            for e in entities[:40]:
+                desc = f" \u2014 {e.description}" if e.description else ""
+                blocks.append(_bulleted((e.name + desc)[:1900]))
+
+    elif fmt == "study_guide":
+        if summaries:
+            blocks.append(_heading("Overview", level=2))
+            for s in summaries:
+                blocks.append(_paragraph(s.content[:1900]))
+        if entities:
+            blocks.append(_heading("Core Concepts", level=2))
+            for e in entities[:30]:
+                blocks.append(_heading(e.name, level=3))
+                if e.description:
+                    blocks.append(_paragraph(e.description[:1900]))
+        if relationships:
+            entity_map = {e.id: e.name for e in entities}
+            blocks.append(_heading("Connections", level=2))
+            for r in relationships[:20]:
+                src = entity_map.get(r.source_entity_id, "?")
+                tgt = entity_map.get(r.target_entity_id, "?")
+                blocks.append(_bulleted(f"{src} {r.relationship_type} {tgt}"))
+        if entities:
+            from bigbrain.compile.diagrams import generate_mindmap
+            from bigbrain.notion.exporter import _code_block
+            mindmap = generate_mindmap(entities, root_title=doc.title[:30])
+            if mindmap:
+                blocks.append(_heading("Knowledge Map", level=2))
+                blocks.append(_code_block(mindmap, "mermaid"))
+
+    else:
+        if summaries:
+            blocks.append(_heading("Content", level=2))
+            blocks.append(_paragraph(summaries[0].content[:1900]))
+        if entities:
+            blocks.append(_heading("Topics", level=2))
+            for e in entities[:30]:
+                blocks.append(_bulleted(f"{e.name}: {e.description}"[:1900]))
+
+    return blocks
 
 
 def _handle_update(args: argparse.Namespace) -> int:
-    print("⚠ 'update' is not implemented yet. This command will be available in a future phase.")
-    return 0
+    """Run incremental update pipeline on changed sources."""
+    from bigbrain.config import load_config
+    from bigbrain.orchestrator.pipeline import Orchestrator
+
+    cfg = load_config()
+    source = args.source
+    if not source:
+        from bigbrain.errors import UserError
+        raise UserError("--source is required for update. Specify a file or directory.")
+
+    force = getattr(args, 'force', False)
+    model = getattr(args, 'model', '') or ''
+
+    # Parse steps
+    step_arg = getattr(args, 'steps', '')
+    steps = set(step_arg.split(',')) if step_arg else None
+
+    compile_format = getattr(args, 'format', '') or ''
+
+    mode = "force" if force else "incremental"
+    print(f"Running {mode} update from: {source}")
+
+    with Orchestrator.from_config(cfg) as orch:
+        result = orch.run(
+            source, force=force, steps=steps,
+            model=model, compile_format=compile_format,
+        )
+
+    print()
+    print(f"Update complete ({', '.join(result.steps_run)}):")
+    print(f"  Ingested:    {result.ingested}")
+    if result.skipped_unchanged:
+        print(f"  Unchanged:   {result.skipped_unchanged}")
+    if result.deleted:
+        print(f"  Deleted:     {result.deleted}")
+    if result.distilled:
+        print(f"  Distilled:   {result.distilled}")
+    if result.compiled:
+        print(f"  Compiled:    {result.compiled}")
+    if result.errors:
+        print(f"  Errors:      {len(result.errors)}")
+        for e in result.errors[:5]:
+            print(f"    ✗ {e}")
+
+    return 1 if result.errors else 0
 
 
 def _handle_status(args: argparse.Namespace) -> int:
@@ -138,11 +621,21 @@ def _handle_status(args: argparse.Namespace) -> int:
 
     with KBStore(db_path) as store:
         stats = store.get_stats()
+        docs = store.list_documents(limit=9999) if not args.brief else []
 
     print("BigBrain Knowledge Base Status")
     print("=" * 40)
     print(f"  Documents:  {stats['total_documents']}")
     print(f"  Sections:   {stats['total_sections']}")
+
+    # Distillation stats
+    if stats.get('total_chunks', 0) or stats.get('total_summaries', 0):
+        print()
+        print("Distilled:")
+        print(f"  Chunks:        {stats.get('total_chunks', 0)}")
+        print(f"  Summaries:     {stats.get('total_summaries', 0)}")
+        print(f"  Entities:      {stats.get('total_entities', 0)}")
+        print(f"  Relationships: {stats.get('total_relationships', 0)}")
 
     # Format size
     size = stats['total_size_bytes']
@@ -159,6 +652,14 @@ def _handle_status(args: argparse.Namespace) -> int:
         print("By Type:")
         for stype, count in sorted(stats['by_type'].items()):
             print(f"  .{stype}: {count} document(s)")
+
+    # Document listing with IDs
+    if docs:
+        print()
+        print("Documents:")
+        for doc in docs:
+            stype = f" [{doc.source.source_type}]" if doc.source else ""
+            print(f"  {doc.id}  {doc.title}{stype}")
 
     # Last runs
     if stats.get('last_successful_run'):
@@ -179,6 +680,181 @@ def _handle_status(args: argparse.Namespace) -> int:
 
     print()
     print(f"Database: {db_path}")
+
+    return 0
+
+
+def _handle_distill_show(args: argparse.Namespace) -> int:
+    """Show distilled content for a document or all documents."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        return 1
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        if args.doc_id:
+            docs = []
+            doc = store.get_document(args.doc_id)
+            if doc:
+                docs = [doc]
+            else:
+                print(f"Document not found: {args.doc_id}")
+                return 1
+        else:
+            docs = store.list_documents(limit=9999)
+
+        if not docs:
+            print("No documents in KB.")
+            return 0
+
+        for doc in docs:
+            summaries = store.get_summaries(doc.id)
+            entities = store.get_entities(doc.id)
+            relationships = store.get_relationships(doc.id)
+
+            if not summaries and not entities and not relationships:
+                continue
+
+            print(f"{'=' * 60}")
+            source = f" [{doc.source.source_type}]" if doc.source else ""
+            print(f"  {doc.title}{source}")
+            print(f"{'=' * 60}")
+
+            if summaries:
+                print()
+                print("📝 Summary:")
+                for s in summaries:
+                    print(f"  {s.content[:1000]}")
+                    if s.generated_by_model:
+                        print(f"  — {s.generated_by_provider}/{s.generated_by_model}")
+
+            if entities:
+                print()
+                print(f"🏷️  Entities ({len(entities)}):")
+                for e in entities[:30]:
+                    desc = f": {e.description[:60]}" if e.description else ""
+                    print(f"  • {e.name} ({e.entity_type}){desc}")
+                if len(entities) > 30:
+                    print(f"  ... and {len(entities) - 30} more")
+
+            if relationships:
+                # Build name lookup from entities
+                ent_map = {e.id: e.name for e in entities}
+                print()
+                print(f"🔗 Relationships ({len(relationships)}):")
+                for r in relationships[:20]:
+                    src = ent_map.get(r.source_entity_id, r.source_entity_id[:8])
+                    tgt = ent_map.get(r.target_entity_id, r.target_entity_id[:8])
+                    print(f"  • {src} —[{r.relationship_type}]→ {tgt}")
+                    if r.description:
+                        print(f"    {r.description[:80]}")
+                if len(relationships) > 20:
+                    print(f"  ... and {len(relationships) - 20} more")
+
+            print()
+
+    return 0
+
+
+def _handle_entities(args: argparse.Namespace) -> int:
+    """List distilled entities with optional type filter."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        return 1
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        entity_type = getattr(args, 'type', '') or ''
+        search = getattr(args, 'search', '') or ''
+
+        # If --types flag, just show available types
+        if getattr(args, 'types', False):
+            type_counts = store.get_entity_types()
+            if not type_counts:
+                print("No entities found.")
+                return 0
+            print(f"Entity types ({sum(c for _, c in type_counts)} total):")
+            for etype, count in type_counts:
+                print(f"  {etype}: {count}")
+            return 0
+
+        entities = store.list_all_entities(
+            entity_type=entity_type,
+            search=search,
+            limit=getattr(args, 'limit', 500),
+        )
+
+    if not entities:
+        filter_info = f" (type={entity_type})" if entity_type else ""
+        filter_info += f" (search={search})" if search else ""
+        print(f"No entities found{filter_info}.")
+        return 0
+
+    # Group by type for display
+    by_type: dict[str, list] = {}
+    for e in entities:
+        by_type.setdefault(e.entity_type, []).append(e)
+
+    print(f"Entities: {len(entities)} found")
+    print()
+    for etype, ents in sorted(by_type.items()):
+        print(f"  [{etype}] ({len(ents)})")
+        for e in ents:
+            desc = f" — {e.description[:70]}" if e.description else ""
+            print(f"    • {e.name}{desc}")
+        print()
+
+    return 0
+
+
+def _handle_compact(args: argparse.Namespace) -> int:
+    """Compact the knowledge base: deduplicate entities, optimize storage."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        return 1
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        # Get before counts
+        stats_before = store.get_stats()
+        entities_before = stats_before.get("total_entities", 0)
+
+        # Deduplicate entities
+        removed = store.dedup_entities()
+
+        # Get after counts
+        stats_after = store.get_stats()
+        entities_after = stats_after.get("total_entities", 0)
+
+    print("Knowledge Base Compaction")
+    print("=" * 40)
+    print(f"  Entities: {entities_before} → {entities_after} ({removed} duplicates removed)")
+    print()
+    if removed == 0:
+        print("  No duplicates found — KB is already clean.")
+    else:
+        print(f"  ✓ Removed {removed} duplicate entities")
 
     return 0
 
@@ -421,6 +1097,28 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         default=False,
         help="Skip saving documents to the knowledge base",
     )
+    p.add_argument(
+        "--url", type=str, default="",
+        help="URL of a web page to ingest",
+    )
+    p.add_argument(
+        "--api", type=str, default="",
+        help="URL of a REST API endpoint to ingest (JSON)",
+    )
+    p.add_argument(
+        "--json-path", type=str, default="",
+        help="Dot-separated path to extract from API JSON response (e.g., 'data.content')",
+    )
+    p.add_argument(
+        "--auth-token", type=str, default="",
+        help="Bearer token for API authentication",
+    )
+    p.add_argument(
+        "--pdf-mode",
+        choices=["standard", "high_fidelity", "max_accuracy"],
+        default=None,
+        help="PDF extraction mode: standard (PyMuPDF), high_fidelity (marker-pdf), max_accuracy (chandra-ocr)",
+    )
     p.set_defaults(func=_handle_ingest)
     return p
 
@@ -430,14 +1128,86 @@ def _add_distill_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
     p = subparsers.add_parser(
         "distill",
         help="Distill ingested content into summaries, entities, and relationships",
-        description="Distill ingested content into summaries, entities, and relationships.",
+        description="Run the distillation pipeline: chunk, summarize, extract entities, build relationships.",
     )
     p.add_argument(
-        "--target",
-        type=str,
-        help="Identifier of the content to distill",
+        "--doc-id", type=str, default="",
+        help="Distill a specific document by ID (default: distill all)",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter documents by source type (e.g., 'txt', 'md', 'pdf')",
+    )
+    p.add_argument(
+        "--model", type=str, default="",
+        help="Override the AI model to use",
+    )
+    p.add_argument(
+        "--workers", type=int, default=2,
+        help="Number of parallel workers for multi-document distillation (default: 2)",
+    )
+    p.add_argument(
+        "--force", action="store_true", default=False,
+        help="Re-distill all chunks even if unchanged (default: incremental)",
+    )
+    p.add_argument(
+        "--step", type=str, default="", choices=["", "summarize", "entities", "relationships"],
+        help="Run only a specific step (default: all steps)",
     )
     p.set_defaults(func=_handle_distill)
+    return p
+
+
+def _add_distill_show_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``distill-show`` subcommand."""
+    p = subparsers.add_parser(
+        "distill-show",
+        help="Show distilled content (summaries, entities, relationships)",
+        description="Display distillation results stored in the knowledge base.",
+    )
+    p.add_argument(
+        "--doc-id", type=str, default="",
+        help="Show distilled content for a specific document (default: all)",
+    )
+    p.set_defaults(func=_handle_distill_show)
+    return p
+
+
+def _add_entities_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``entities`` subcommand."""
+    p = subparsers.add_parser(
+        "entities",
+        help="List distilled entities with optional filters",
+        description="Display extracted entities from the knowledge base.",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter by entity type (e.g., algorithm, concept, data_structure, theorem, technique)",
+    )
+    p.add_argument(
+        "--search", type=str, default="",
+        help="Search entities by name or description",
+    )
+    p.add_argument(
+        "--types", action="store_true", default=False,
+        help="Show available entity types with counts",
+    )
+    p.add_argument(
+        "--limit", type=int, default=500,
+        help="Maximum entities to display (default: 500)",
+    )
+    p.set_defaults(func=_handle_entities)
+    return p
+
+
+def _add_compact_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``compact`` subcommand."""
+    p = subparsers.add_parser(
+        "compact",
+        help="Compact the KB: deduplicate entities, optimize storage",
+        description="Remove duplicate entities and optimize the knowledge base.",
+    )
+    p.set_defaults(func=_handle_compact)
     return p
 
 
@@ -446,13 +1216,37 @@ def _add_compile_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
     p = subparsers.add_parser(
         "compile",
         help="Compile knowledge base into output formats",
-        description="Compile knowledge base into output formats.",
+        description="Render distilled content as markdown, flashcards, cheatsheets, Q&A, or study guides.",
     )
     p.add_argument(
-        "--format",
-        choices=["markdown", "cheatsheet", "flashcard", "qa"],
+        "--format", "-f",
+        choices=["markdown", "flashcard", "cheatsheet", "qa", "study_guide"],
         default="markdown",
         help="Output format (default: markdown)",
+    )
+    p.add_argument(
+        "--doc-id", type=str, default="",
+        help="Compile a specific document by ID (default: compile all)",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter documents by source type",
+    )
+    p.add_argument(
+        "--model", type=str, default="",
+        help="Override the AI model (for flashcard, qa, study_guide)",
+    )
+    p.add_argument(
+        "--output", "-o", type=str, default="",
+        help="Output file path (default: auto-generate in build/ directory)",
+    )
+    p.add_argument(
+        "--to-notion", action="store_true", default=False,
+        help="Write compiled output to Notion under 'Big Brain/<doc>/<format>' pages",
+    )
+    p.add_argument(
+        "--notion-parent", type=str, default="",
+        help="Notion parent page ID for --to-notion (default: creates 'Big Brain' under first workspace page)",
     )
     p.set_defaults(func=_handle_compile)
     return p
@@ -463,14 +1257,13 @@ def _add_update_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     p = subparsers.add_parser(
         "update",
         help="Run incremental update pipeline on changed sources",
-        description="Run incremental update pipeline on changed sources.",
+        description="Detect changes, re-ingest, distill, and compile incrementally.",
     )
-    p.add_argument(
-        "--source",
-        type=str,
-        default=None,
-        help="Optional path filter to limit the update scope",
-    )
+    p.add_argument("--source", type=str, default=None, help="Path to file or directory")
+    p.add_argument("--force", action="store_true", default=False, help="Skip change detection, reprocess everything")
+    p.add_argument("--steps", type=str, default="", help="Comma-separated steps: ingest,distill,compile (default: all)")
+    p.add_argument("--model", type=str, default="", help="Override AI model")
+    p.add_argument("--format", type=str, default="", help="Compile format (markdown, flashcard, etc.)")
     p.set_defaults(func=_handle_update)
     return p
 
@@ -481,6 +1274,10 @@ def _add_status_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         "status",
         help="Show current knowledge base status and statistics",
         description="Show current knowledge base status and statistics.",
+    )
+    p.add_argument(
+        "--brief", action="store_true", default=False,
+        help="Show only counts, skip document listing",
     )
     p.set_defaults(func=_handle_status)
     return p
@@ -577,6 +1374,832 @@ def _add_ask_parser(subparsers: argparse._SubParsersAction) -> argparse.Argument
     return p
 
 
+def _handle_auth(args: argparse.Namespace) -> int:
+    """Manage GitHub authentication."""
+    from bigbrain.providers.github_auth import (
+        device_flow_login,
+        clear_cached_token,
+        resolve_github_token,
+        validate_token,
+        AuthError,
+        _TOKEN_CACHE_PATH,
+    )
+
+    action = args.action
+
+    if action == "login":
+        try:
+            token = device_flow_login()
+            print(f"Authenticated successfully. Token cached at {_TOKEN_CACHE_PATH}")
+            return 0
+        except AuthError as exc:
+            print(f"Authentication failed: {exc}", file=sys.stderr)
+            return 1
+
+    elif action == "logout":
+        if clear_cached_token():
+            print("GitHub token removed.")
+        else:
+            print("No cached token found.")
+        return 0
+
+    elif action == "status":
+        token = resolve_github_token()
+        if validate_token(token):
+            # Mask the token for display
+            masked = token[:8] + "..." + token[-4:] if len(token) > 16 else "***"
+            print(f"GitHub token: {masked}")
+            if _TOKEN_CACHE_PATH.exists():
+                print(f"  Cached at: {_TOKEN_CACHE_PATH}")
+        else:
+            print("No valid GitHub token found.")
+            print("  Run 'bigbrain auth login' to authenticate.")
+        return 0
+
+    return 0
+
+
+def _add_auth_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``auth`` subcommand."""
+    p = subparsers.add_parser(
+        "auth",
+        help="Manage GitHub authentication for Copilot",
+        description="Login, logout, or check GitHub Copilot authentication status.",
+    )
+    p.add_argument(
+        "action",
+        choices=["login", "logout", "status"],
+        help="Authentication action: login (device flow), logout (clear token), status (check token)",
+    )
+    p.set_defaults(func=_handle_auth)
+    return p
+
+
+# ---------------------------------------------------------------------------
+# Notion integration
+# ---------------------------------------------------------------------------
+
+
+def _notion_publish(cfg, args) -> int:
+    """Publish structured chapter pages to Notion.
+    
+    Creates: Big Brain/<book>/<chapter> with summaries and entity explanations.
+    """
+    from pathlib import Path
+    from bigbrain.notion.client import NotionClient
+    from bigbrain.notion.exporter import _paragraph, _heading, _bulleted, _divider
+    from bigbrain.kb.store import KBStore
+
+    client = NotionClient.from_config(cfg.notion)
+    if not client.is_available():
+        print("Notion is not available. Check BIGBRAIN_NOTION_TOKEN.")
+        return 1
+
+    store = KBStore(cfg.kb_db_path)
+    digest_root = Path("digest")
+
+    # Find or create Big Brain root
+    pages = client.search_pages("Big Brain", page_size=5)
+    bb_id = None
+    for p in pages:
+        if client.get_page_title(p).strip() == "Big Brain":
+            bb_id = p["id"]
+            break
+
+    if not bb_id:
+        all_pages = client.search_pages("", page_size=1)
+        if not all_pages:
+            print("No pages found in Notion workspace.")
+            store.close()
+            return 1
+        root_parent = all_pages[0].get("parent", {})
+        root_id = root_parent.get("page_id", all_pages[0]["id"]) if root_parent.get("type") == "page_id" else all_pages[0]["id"]
+        page = client.create_page(root_id, "Big Brain", children=[
+            _paragraph("BigBrain knowledge base \u2014 structured chapter summaries."),
+        ])
+        bb_id = page["id"]
+        print(f"Created 'Big Brain': {bb_id[:12]}")
+    else:
+        print(f"Found 'Big Brain': {bb_id[:12]}")
+
+    # Get entities from KB for enrichment
+    docs = store.list_documents(limit=100)
+    entity_map = {}
+    for doc in docs:
+        entity_map[doc.id] = store.get_entities(doc.id)
+
+    if not digest_root.is_dir():
+        print(f"No digest directory found at {digest_root}")
+        store.close()
+        return 0
+
+    for book_dir in sorted(digest_root.iterdir()):
+        if not book_dir.is_dir():
+            continue
+
+        book_name = book_dir.name.replace("-", " ").replace("_", " ")
+        print(f"\n\u2500 {book_name}")
+
+        # Find or create book page
+        book_page_id = _find_child_page(client, bb_id, book_name)
+        if not book_page_id:
+            bp = client.create_page(bb_id, book_name, children=[
+                _paragraph(f"Chapter-by-chapter knowledge from {book_name}."),
+            ])
+            book_page_id = bp["id"]
+            print(f"  Created book page: {book_page_id[:12]}")
+
+        chapter_files = sorted(book_dir.glob("chapter-*.md"))
+        if not chapter_files:
+            print("  No chapter files found")
+            continue
+
+        # Find matching KB doc for entities
+        doc_entities = []
+        for doc in docs:
+            if doc.title and book_name.lower()[:20] in doc.title.lower():
+                doc_entities = entity_map.get(doc.id, [])
+                break
+
+        for ch_file in chapter_files:
+            ch_content = ch_file.read_text(encoding="utf-8")
+            ch_title = ch_file.stem.replace("-", " ").title()
+            for line in ch_content.split("\n"):
+                if line.startswith("# "):
+                    ch_title = line[2:].strip()
+                    break
+
+            print(f"  \u251c {ch_title}")
+
+            ch_page_id = _find_child_page(client, book_page_id, ch_title)
+            blocks = _markdown_to_notion_blocks(ch_content, doc_entities)
+
+            batch_size = 100
+            if ch_page_id:
+                client.update_page_blocks(ch_page_id, blocks[:batch_size])
+                remaining = blocks[batch_size:]
+                while remaining:
+                    client._client.blocks.children.append(
+                        block_id=ch_page_id, children=remaining[:batch_size]
+                    )
+                    remaining = remaining[batch_size:]
+                print(f"    Updated ({len(blocks)} blocks)")
+            else:
+                cp = client.create_page(book_page_id, ch_title, children=blocks[:batch_size])
+                ch_page_id = cp["id"]
+                remaining = blocks[batch_size:]
+                while remaining:
+                    client._client.blocks.children.append(
+                        block_id=ch_page_id, children=remaining[:batch_size]
+                    )
+                    remaining = remaining[batch_size:]
+                print(f"    Created ({len(blocks)} blocks)")
+
+    store.close()
+    print("\nPublish complete!")
+    return 0
+
+
+def _find_child_page(client, parent_id: str, title: str):
+    """Find a child page by title. Returns page ID or None."""
+    try:
+        children = client.get_page_blocks(parent_id)
+        for c in children:
+            if c.get("type") == "child_page":
+                child_title = c.get("child_page", {}).get("title", "")
+                if child_title.strip() == title.strip():
+                    return c["id"]
+    except Exception:
+        pass
+    return None
+
+
+def _markdown_to_notion_blocks(md_content: str, entities=None):
+    """Convert markdown to Notion blocks with entity enrichment."""
+    from bigbrain.notion.exporter import _paragraph, _heading, _bulleted, _divider
+
+    blocks = []
+    lines = md_content.split("\n")
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        if line.startswith("# ") and i < 3:
+            i += 1
+            continue
+
+        if line.startswith("## "):
+            blocks.append(_heading(line[3:].strip(), level=2))
+            i += 1
+            continue
+        if line.startswith("### "):
+            blocks.append(_heading(line[4:].strip(), level=3))
+            i += 1
+            continue
+
+        if line.startswith("- "):
+            text = line[2:].strip().replace("**", "")
+            blocks.append(_bulleted(text[:1900]))
+            i += 1
+            continue
+
+        if line.startswith("```"):
+            code_lines = []
+            lang = line[3:].strip()
+            i += 1
+            while i < len(lines) and not lines[i].startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            i += 1
+            code_text = "\n".join(code_lines)
+            if code_text.strip():
+                blocks.append({
+                    "object": "block", "type": "code",
+                    "code": {
+                        "rich_text": [{"type": "text", "text": {"content": code_text[:2000]}}],
+                        "language": lang or "plain text",
+                    },
+                })
+            continue
+
+        if line.strip() == "---":
+            blocks.append(_divider())
+            i += 1
+            continue
+
+        if line.strip():
+            blocks.append(_paragraph(line.strip().replace("**", "")[:1900]))
+
+        i += 1
+
+    # Related entities section
+    if entities:
+        ch_text = md_content.lower()
+        related = [e for e in entities if e.name.lower() in ch_text]
+        if related:
+            blocks.append(_divider())
+            blocks.append(_heading("Related Entities", level=2))
+            for e in related[:20]:
+                desc = f" \u2014 {e.description}" if e.description else ""
+                blocks.append(_bulleted(f"{e.name} ({e.entity_type}){desc}"[:1900]))
+
+    return blocks
+
+
+def _handle_notion(args: argparse.Namespace) -> int:
+    """Manage Notion integration."""
+    from bigbrain.config import load_config
+
+    cfg = load_config()
+    action = args.action
+
+    if action == "status":
+        from bigbrain.notion.client import NotionClient
+
+        client = NotionClient.from_config(cfg.notion)
+
+        available = client.is_available()
+        print("Notion Integration Status")
+        print("=" * 40)
+        conn_status = "\u2713 yes" if available else "\u2717 no"
+        print(f"  Connected: {conn_status}")
+        print(f"  Direction: {cfg.notion.sync_direction}")
+
+        if available:
+            from pathlib import Path
+
+            if Path(cfg.kb_db_path).exists():
+                from bigbrain.notion.sync import SyncEngine
+                from bigbrain.kb.store import KBStore
+
+                with KBStore(cfg.kb_db_path) as store:
+                    engine = SyncEngine(client=client, store=store, config=cfg.notion)
+                    mappings = engine.get_sync_status()
+
+                if mappings:
+                    print()
+                    print(f"Synced documents ({len(mappings)}):")
+                    for m in mappings:
+                        print(f"  {m['document_id'][:12]}  {m['title']}  [{m['status']}]")
+                        print(f"    Notion: {m['notion_page_id'][:12]}  Last sync: {m['last_synced_at'] or 'never'}")
+                else:
+                    print()
+                    print("No sync mappings yet. Run 'bigbrain notion sync' or 'bigbrain notion import'.")
+        return 0
+
+    elif action == "sync":
+        from bigbrain.notion.sync import SyncEngine
+
+        parent = args.parent_page_id if hasattr(args, 'parent_page_id') and args.parent_page_id else cfg.notion.default_page_id
+
+        print("Syncing with Notion...")
+        with SyncEngine.from_config(cfg) as engine:
+            result = engine.sync(parent_page_id=parent)
+
+        print()
+        print("Sync complete:")
+        print(f"  Imported:  {result.imported}")
+        print(f"  Exported:  {result.exported}")
+        print(f"  Skipped:   {result.skipped}")
+        if result.conflicts:
+            print(f"  Conflicts: {result.conflicts}")
+        if result.errors:
+            print(f"  Errors:    {len(result.errors)}")
+            for e in result.errors[:5]:
+                print(f"    \u2717 {e}")
+        return 0
+
+    elif action == "import":
+        from bigbrain.notion.sync import SyncEngine
+
+        query = args.query if hasattr(args, 'query') and args.query else ""
+        max_pages = args.limit if hasattr(args, 'limit') else 20
+
+        suffix = f" matching: {query}" if query else ""
+        print(f"Importing Notion pages{suffix}...")
+        with SyncEngine.from_config(cfg) as engine:
+            result = engine.import_pages(query=query, max_pages=max_pages)
+
+        print(f"  Imported: {result.imported}")
+        if result.errors:
+            print(f"  Errors:   {len(result.errors)}")
+        return 0
+
+    elif action == "export":
+        from bigbrain.notion.sync import SyncEngine
+
+        parent = args.parent_page_id if hasattr(args, 'parent_page_id') and args.parent_page_id else cfg.notion.default_page_id
+
+        if not parent:
+            print("Error: --parent-page-id is required for export (or set notion.default_page_id in config).")
+            return 1
+
+        source_type = args.type if hasattr(args, 'type') and args.type else None
+        print("Exporting KB documents to Notion...")
+        with SyncEngine.from_config(cfg) as engine:
+            result = engine.export_documents(parent_page_id=parent, source_type=source_type)
+
+        print(f"  Exported: {result.exported}")
+        if result.errors:
+            print(f"  Errors:   {len(result.errors)}")
+        return 0
+
+    elif action == "publish":
+        return _notion_publish(cfg, args)
+
+    elif action == "cleanup":
+        from bigbrain.notion.client import NotionClient
+        from bigbrain.notion.exporter import _paragraph, _heading, _callout, _divider
+        client = NotionClient.from_config(cfg.notion)
+        if not client.is_available():
+            print("Notion is not available. Check your token.")
+            return 1
+
+        strategy = getattr(args, 'on_duplicate', 'archive')
+        print(f"Scanning for duplicate pages (strategy: {strategy})...")
+
+        def _normalize_title(t: str) -> str:
+            """Normalize title for fuzzy dedup."""
+            import re
+            t = t.lower().strip()
+            t = re.sub(r'[,;:!?\'"()]', ' ', t)
+            t = re.sub(r'\b3rd\b', 'third', t)
+            t = re.sub(r'\b1st\b', 'first', t)
+            t = re.sub(r'\b2nd\b', 'second', t)
+            t = re.sub(r'\b4th\b', 'fourth', t)
+            t = re.sub(r'\bed\.?\b', 'edition', t)
+            t = re.sub(r'\bedn\.?\b', 'edition', t)
+            t = ' '.join(t.split())
+            return t
+
+        def _extract_block_text(block: dict) -> str:
+            """Extract plain text from a block for comparison."""
+            btype = block.get("type", "")
+            data = block.get(btype, {})
+            rt = data.get("rich_text", [])
+            return "".join(t.get("plain_text", "") for t in rt if isinstance(t, dict)).strip()
+
+        def _dispose_duplicate(page_id: str, title: str) -> bool:
+            """Handle a duplicate page based on the chosen strategy. Returns True if handled."""
+            if strategy == "report":
+                print(f"      [REPORT] Would dispose: '{title}' ({page_id[:12]})")
+                return False
+            elif strategy == "rename":
+                try:
+                    new_title = f"[MERGED] {title}"
+                    client._client.pages.update(
+                        page_id=page_id,
+                        properties={"title": [{"text": {"content": new_title}}]},
+                    )
+                    print(f"      Renamed → '{new_title}'")
+                    return True
+                except Exception as exc:
+                    print(f"      Failed to rename {page_id[:12]}: {exc}")
+                    return False
+            else:  # archive (default)
+                try:
+                    client._client.pages.update(page_id=page_id, archived=True)
+                    print(f"      Archived: '{title}'")
+                    return True
+                except Exception as exc:
+                    print(f"      Failed to archive {page_id[:12]}: {exc}")
+                    return False
+
+        def _merge_pages(keep_id: str, dup_id: str, keep_title: str, dup_title: str) -> tuple[int, int]:
+            """Merge content from dup page into keep page. Returns (merged, conflicts)."""
+            merged_count = 0
+            conflict_count = 0
+
+            # Get child pages from both
+            keep_children = client.get_page_blocks(keep_id)
+            dup_children = client.get_page_blocks(dup_id)
+
+            keep_child_pages = {}  # norm_title → (title, id)
+            for c in keep_children:
+                if c.get("type") == "child_page":
+                    t = c.get("child_page", {}).get("title", "")
+                    keep_child_pages[_normalize_title(t)] = (t, c["id"])
+
+            dup_child_pages = {}
+            for c in dup_children:
+                if c.get("type") == "child_page":
+                    t = c.get("child_page", {}).get("title", "")
+                    dup_child_pages[_normalize_title(t)] = (t, c["id"])
+
+            # Items only in dup → move to keep (re-create under keep)
+            for norm, (title, dup_child_id) in dup_child_pages.items():
+                if norm not in keep_child_pages:
+                    # Unique to dup — copy blocks to a new page under keep
+                    dup_blocks = client.get_page_blocks(dup_child_id)
+                    content_blocks = [b for b in dup_blocks if b.get("type") != "child_page"]
+                    safe_blocks = content_blocks[:100] if content_blocks else [_paragraph("(merged from duplicate)")]
+                    try:
+                        new_page = client.create_page(keep_id, title, children=safe_blocks)
+                        remaining = content_blocks[100:]
+                        while remaining:
+                            client._client.blocks.children.append(block_id=new_page["id"], children=remaining[:100])
+                            remaining = remaining[100:]
+                        merged_count += 1
+                        print(f"      Merged unique page: {title}")
+                    except Exception as exc:
+                        print(f"      Failed to merge {title}: {exc}")
+                else:
+                    # Exists on both sides — check for conflicts
+                    keep_child_id = keep_child_pages[norm][1]
+                    keep_blocks = client.get_page_blocks(keep_child_id)
+                    dup_blocks = client.get_page_blocks(dup_child_id)
+
+                    keep_texts = {_extract_block_text(b) for b in keep_blocks if _extract_block_text(b)}
+                    dup_only_blocks = []
+                    conflict_blocks = []
+
+                    for b in dup_blocks:
+                        bt = _extract_block_text(b)
+                        if not bt:
+                            continue
+                        if bt not in keep_texts:
+                            # Content only in dup — could be unique addition or conflict
+                            dup_only_blocks.append(b)
+
+                    if dup_only_blocks:
+                        # Append unique content from dup with a conflict marker
+                        marker_blocks = [
+                            _divider(),
+                            _callout(
+                                f"\u26a0\ufe0f Merged from duplicate page '{dup_title}/{title}'. "
+                                "Review the content below for conflicts.",
+                                "\u26a0\ufe0f"
+                            ),
+                        ]
+                        # Re-create dup-only blocks as paragraphs (can't move blocks across pages)
+                        for b in dup_only_blocks[:50]:
+                            bt = _extract_block_text(b)
+                            if bt:
+                                marker_blocks.append(_paragraph(bt[:1900]))
+
+                        try:
+                            client._client.blocks.children.append(
+                                block_id=keep_child_id, children=marker_blocks[:100]
+                            )
+                            conflict_count += 1
+                            print(f"      Conflict merged: {title} ({len(dup_only_blocks)} blocks marked)")
+                        except Exception as exc:
+                            print(f"      Failed to merge conflicts for {title}: {exc}")
+
+            # Also merge any non-child-page blocks from the dup root
+            dup_root_blocks = [b for b in dup_children if b.get("type") != "child_page"]
+            keep_root_texts = {_extract_block_text(b) for b in keep_children if _extract_block_text(b)}
+            unique_root = [b for b in dup_root_blocks if _extract_block_text(b) and _extract_block_text(b) not in keep_root_texts]
+
+            if unique_root:
+                merge_root_blocks = [
+                    _callout(f"Content merged from '{dup_title}'", "\U0001f504"),
+                ]
+                for b in unique_root[:30]:
+                    bt = _extract_block_text(b)
+                    if bt:
+                        merge_root_blocks.append(_paragraph(bt[:1900]))
+                try:
+                    client._client.blocks.children.append(block_id=keep_id, children=merge_root_blocks[:100])
+                    merged_count += 1
+                except Exception:
+                    pass
+
+            return merged_count, conflict_count
+
+        # Find all "Big Brain" pages — keep first, merge + archive rest
+        bb_pages = []
+        all_pages = client.search_pages("Big Brain", page_size=20)
+        for p in all_pages:
+            if client.get_page_title(p).strip() == "Big Brain":
+                bb_pages.append(p)
+
+        removed = 0
+        total_merged = 0
+        total_conflicts = 0
+
+        if len(bb_pages) > 1:
+            keep = bb_pages[0]
+            print(f"  Keeping Big Brain: {keep['id'][:12]}")
+            for dup in bb_pages[1:]:
+                m, c = _merge_pages(keep["id"], dup["id"], "Big Brain", "Big Brain (dup)")
+                total_merged += m
+                total_conflicts += c
+                if _dispose_duplicate(dup["id"], "Big Brain (dup)"):
+                    removed += 1
+
+        # Deduplicate child doc pages under Big Brain (with merge)
+        # Strategy: keep the page with MORE content, merge unique from the other
+        if bb_pages:
+            bb_id = bb_pages[0]["id"]
+            children = client.get_page_blocks(bb_id)
+            doc_pages = {}  # norm → (title, page_id)
+            for c in children:
+                if c.get("type") == "child_page":
+                    title = c.get("child_page", {}).get("title", "")
+                    norm = _normalize_title(title)
+                    if norm in doc_pages:
+                        existing_title, existing_id = doc_pages[norm]
+                        new_title, new_id = title, c["id"]
+
+                        # Count content in each to decide which to keep
+                        existing_blocks = client.get_page_blocks(existing_id)
+                        new_blocks = client.get_page_blocks(new_id)
+                        existing_count = len(existing_blocks)
+                        new_count = len(new_blocks)
+
+                        if new_count > existing_count:
+                            # New page has more content — swap: keep new, merge from existing
+                            keep_title, keep_id = new_title, new_id
+                            dup_title, dup_id = existing_title, existing_id
+                            doc_pages[norm] = (keep_title, keep_id)
+                        else:
+                            keep_title, keep_id = existing_title, existing_id
+                            dup_title, dup_id = new_title, new_id
+
+                        smaller_count = min(existing_count, new_count)
+                        bigger_count = max(existing_count, new_count)
+                        print(f"  Duplicate: '{dup_title}' ({smaller_count} blocks) vs '{keep_title}' ({bigger_count} blocks)")
+                        print(f"    Keeping '{keep_title}' (more content), merging unique from '{dup_title}'")
+
+                        m, conf = _merge_pages(keep_id, dup_id, keep_title, dup_title)
+                        total_merged += m
+                        total_conflicts += conf
+                        if _dispose_duplicate(dup_id, dup_title):
+                            removed += 1
+                    else:
+                        doc_pages[norm] = (title, c["id"])
+
+            # Deduplicate format sub-pages (within each doc page)
+            for norm_title, (doc_title, doc_page_id) in doc_pages.items():
+                sub_blocks = client.get_page_blocks(doc_page_id)
+                format_pages = {}
+                for sb in sub_blocks:
+                    if sb.get("type") == "child_page":
+                        fmt_title = sb.get("child_page", {}).get("title", "")
+                        fmt_norm = _normalize_title(fmt_title)
+                        if fmt_norm in format_pages:
+                            existing_fmt, existing_fmt_id = format_pages[fmt_norm]
+
+                            # Keep the one with more content
+                            existing_fmt_blocks = client.get_page_blocks(existing_fmt_id)
+                            new_fmt_blocks = client.get_page_blocks(sb["id"])
+
+                            if len(new_fmt_blocks) > len(existing_fmt_blocks):
+                                keep_fmt_id, dup_fmt_id = sb["id"], existing_fmt_id
+                                keep_fmt_blocks, dup_fmt_blocks = new_fmt_blocks, existing_fmt_blocks
+                                format_pages[fmt_norm] = (fmt_title, sb["id"])
+                            else:
+                                keep_fmt_id, dup_fmt_id = existing_fmt_id, sb["id"]
+                                keep_fmt_blocks, dup_fmt_blocks = existing_fmt_blocks, new_fmt_blocks
+
+                            # Merge unique content from the smaller one
+                            keep_texts = {_extract_block_text(b) for b in keep_fmt_blocks if _extract_block_text(b)}
+                            unique_blocks = [b for b in dup_fmt_blocks if _extract_block_text(b) and _extract_block_text(b) not in keep_texts]
+
+                            if unique_blocks:
+                                merge_blocks = [_callout(f"\u26a0\ufe0f Merged from duplicate — review below", "\u26a0\ufe0f")]
+                                for b in unique_blocks[:50]:
+                                    bt = _extract_block_text(b)
+                                    if bt:
+                                        merge_blocks.append(_paragraph(bt[:1900]))
+                                try:
+                                    client._client.blocks.children.append(block_id=keep_fmt_id, children=merge_blocks[:100])
+                                    total_conflicts += 1
+                                except Exception:
+                                    pass
+
+                            if _dispose_duplicate(dup_fmt_id, fmt_title):
+                                removed += 1
+                        else:
+                            format_pages[fmt_norm] = (fmt_title, sb["id"])
+
+        action_word = {"archive": "Archived", "rename": "Renamed", "report": "Found"}.get(strategy, "Handled")
+        print(f"\nCleanup complete ({strategy} mode):")
+        print(f"  {action_word}: {removed} duplicate(s)")
+        print(f"  Merged:   {total_merged} unique page(s)")
+        if total_conflicts:
+            print(f"  Conflicts: {total_conflicts} (marked with \u26a0\ufe0f callouts \u2014 review in Notion)")
+        return 0
+
+    else:
+        print(f"Unknown action: {action}")
+        return 1
+
+
+def _add_notion_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``notion`` subcommand."""
+    p = subparsers.add_parser(
+        "notion",
+        help="Manage Notion integration (sync, import, export)",
+        description="Bidirectional sync between BigBrain KB and Notion workspace.",
+    )
+    p.add_argument(
+        "action",
+        choices=["sync", "import", "export", "status", "publish", "cleanup"],
+        help="Notion action: sync, import, export, status, publish (chapters to Notion), cleanup (remove duplicates)",
+    )
+    p.add_argument(
+        "--parent-page-id", type=str, default="",
+        help="Notion parent page ID for exports/new pages",
+    )
+    p.add_argument(
+        "--query", "-q", type=str, default="",
+        help="Search query for Notion import (filters pages)",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Filter KB documents by source type for export",
+    )
+    p.add_argument(
+        "--limit", type=int, default=20,
+        help="Max pages to import (default: 20)",
+    )
+    p.add_argument(
+        "--on-duplicate",
+        choices=["archive", "rename", "report"],
+        default="archive",
+        help="Cleanup strategy for duplicates: archive (trash), rename (prefix with [MERGED]), report (list only)",
+    )
+    p.set_defaults(func=_handle_notion)
+    return p
+
+
+def _handle_plugins(args: argparse.Namespace) -> int:
+    """List discovered plugins."""
+    from bigbrain.config import load_config
+    from bigbrain.plugins.loader import PluginLoader
+
+    cfg = load_config()
+    loader = PluginLoader.from_config(cfg)
+    count = loader.load_all()
+
+    plugins = loader.list_plugins()
+
+    if not plugins:
+        print("No plugins discovered.")
+        print(f"  Plugin directory: {cfg.plugins.plugins_dir}")
+        print("  Place .py files with PluginBase subclasses in that directory.")
+        return 0
+
+    print(f"Discovered {count} plugin(s):")
+    print()
+    for info in plugins:
+        print(f"  {info.name} v{info.version} [{info.plugin_type}]")
+        if info.description:
+            print(f"    {info.description}")
+
+    loader.unload_all()
+    return 0
+
+
+def _add_plugins_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``plugins`` subcommand."""
+    p = subparsers.add_parser(
+        "plugins",
+        help="List discovered plugins",
+        description="Show installed and discovered BigBrain plugins.",
+    )
+    p.set_defaults(func=_handle_plugins)
+    return p
+
+
+# ---------------------------------------------------------------------------
+# wiki subcommand
+# ---------------------------------------------------------------------------
+
+def _handle_wiki(args: argparse.Namespace) -> int:
+    """Build and manage the knowledge wiki."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    action = args.action
+
+    if action == "build":
+        db_path = cfg.kb_db_path
+        if not Path(db_path).exists():
+            print("Knowledge base is empty. Run 'bigbrain ingest' first.")
+            return 1
+
+        from bigbrain.wiki.builder import WikiBuilder
+
+        doc_id = getattr(args, 'doc_id', '') or ''
+        clean = getattr(args, 'clean', False)
+        dry_run = getattr(args, 'dry_run', False)
+        enrich = getattr(args, 'enrich', False)
+        model = getattr(args, 'model', '') or ''
+
+        mode = "dry run" if dry_run else ("clean" if clean else "incremental")
+        if enrich:
+            mode += " + AI enrichment"
+        print(f"Building wiki ({mode})...")
+
+        with WikiBuilder.from_config(cfg) as builder:
+            result = builder.build(doc_id=doc_id, clean=clean, dry_run=dry_run, enrich=enrich, model=model)
+
+        print()
+        print(f"Wiki build complete:")
+        print(f"  Total pages:   {result.total_pages}")
+        print(f"  Entity pages:  {result.entity_pages}")
+        print(f"  Source pages:  {result.source_pages}")
+        print(f"  Written:       {result.written}")
+        print(f"  Unchanged:     {result.skipped_unchanged}")
+        print(f"  Cross-links:   {result.total_links}")
+        if result.orphan_pages:
+            print(f"  Orphan pages:  {result.orphan_pages}")
+        if result.errors:
+            print(f"  Errors:        {len(result.errors)}")
+
+        print(f"\n  Wiki directory: wiki/")
+        return 0
+
+    elif action == "status":
+        wiki_dir = Path("wiki")
+        if not wiki_dir.is_dir():
+            print("No wiki directory found. Run 'bigbrain wiki build' first.")
+            return 0
+
+        pages = sorted(wiki_dir.glob("*.md"))
+        print(f"Wiki Status")
+        print(f"{'=' * 40}")
+        print(f"  Pages: {len(pages)}")
+        print(f"  Directory: {wiki_dir.resolve()}")
+        if pages:
+            print()
+            for p in pages[:30]:
+                print(f"  {p.stem}.md")
+            if len(pages) > 30:
+                print(f"  ... and {len(pages) - 30} more")
+        return 0
+
+    else:
+        print(f"Unknown wiki action: {action}")
+        return 1
+
+
+def _add_wiki_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``wiki`` subcommand."""
+    p = subparsers.add_parser(
+        "wiki",
+        help="Build and manage the knowledge wiki",
+        description="Generate an interlinked markdown wiki from the knowledge base.",
+    )
+    p.add_argument(
+        "action",
+        choices=["build", "status"],
+        help="Wiki action: build (generate pages), status (show wiki info)",
+    )
+    p.add_argument("--doc-id", type=str, default="", help="Build only for a specific document")
+    p.add_argument("--clean", action="store_true", default=False, help="Remove orphan wiki files not in current build")
+    p.add_argument("--dry-run", action="store_true", default=False, help="Show what would be built without writing files")
+    p.add_argument("--enrich", action="store_true", default=False, help="Use AI to expand entity descriptions on wiki pages")
+    p.add_argument("--model", type=str, default="", help="Override AI model for wiki enrichment")
+    p.set_defaults(func=_handle_wiki)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -591,10 +2214,27 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # Global logging options
+    parser.add_argument(
+        "--quiet", "-q", action="store_true", default=False,
+        help="Suppress log output",
+    )
+    parser.add_argument(
+        "--log-file", type=str, default="",
+        help="Write logs to a file",
+    )
+    parser.add_argument(
+        "--log-format", choices=["console", "json"], default="console",
+        help="Log output format (default: console)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", title="commands")
 
     _add_ingest_parser(subparsers)
     _add_distill_parser(subparsers)
+    _add_distill_show_parser(subparsers)
+    _add_entities_parser(subparsers)
+    _add_compact_parser(subparsers)
     _add_compile_parser(subparsers)
     _add_update_parser(subparsers)
     _add_status_parser(subparsers)
@@ -603,6 +2243,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_kb_import_parser(subparsers)
     _add_providers_parser(subparsers)
     _add_ask_parser(subparsers)
+    _add_auth_parser(subparsers)
+    _add_notion_parser(subparsers)
+    _add_plugins_parser(subparsers)
+    _add_wiki_parser(subparsers)
 
     return parser
 
@@ -624,15 +2268,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     int
         Exit code – 0 on success, 1 on error.
     """
-    # Best-effort logging bootstrap; the module may not exist yet.
-    try:
-        from bigbrain.logging_config import setup_logging
-        setup_logging()
-    except ImportError:
-        pass
-
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # Configure logging using parsed CLI flags.
+    try:
+        from bigbrain.logging_config import setup_logging
+        setup_logging(
+            quiet=getattr(args, "quiet", False),
+            log_file=getattr(args, "log_file", ""),
+            log_format=getattr(args, "log_format", "console"),
+        )
+    except ImportError:
+        pass
 
     if args.command is None:
         parser.print_help()

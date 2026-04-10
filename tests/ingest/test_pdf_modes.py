@@ -1,4 +1,4 @@
-"""Tests for PDF mode switching (standard / high_fidelity / max_accuracy)."""
+"""Tests for PDF mode switching (standard / max_accuracy)."""
 
 from __future__ import annotations
 
@@ -62,104 +62,6 @@ class TestPdfModeSwitch:
         assert len(doc.sections) == 2  # sample.pdf has 2 pages
         assert doc.sections[0].title == "Page 1"
         assert doc.metadata.get("pdf_title") == "Test Document"
-
-
-class TestMarkerBackend:
-    """Tests for the marker-pdf backend (high_fidelity mode)."""
-
-    def setup_method(self):
-        set_active_pdf_mode("standard")
-        self.ingester = PdfIngester()
-
-    def test_marker_mode_raises_when_not_installed(self):
-        set_active_pdf_mode("high_fidelity")
-        with patch.dict("sys.modules", {"marker": None, "marker.converters": None,
-                                         "marker.converters.pdf": None,
-                                         "marker.models": None,
-                                         "marker.output": None}):
-            with pytest.raises(UserError, match="marker-pdf is required"):
-                self.ingester.ingest(PDF_PATH)
-
-    def test_marker_mode_calls_marker_converter(self):
-        set_active_pdf_mode("high_fidelity")
-
-        # Mock the entire marker pipeline
-        mock_converter_cls = MagicMock()
-        mock_converter_instance = MagicMock()
-        mock_converter_cls.return_value = mock_converter_instance
-
-        mock_rendered = MagicMock()
-        mock_converter_instance.return_value = mock_rendered
-
-        mock_create_models = MagicMock(return_value={})
-
-        sample_markdown = "# Chapter 1\n\nThis is $O(n \\log n)$ complexity.\n\n## Section 1.1\n\nDetails here."
-        mock_text_from_rendered = MagicMock(return_value=(sample_markdown, {}, []))
-
-        with patch.dict("sys.modules", {
-            "marker": MagicMock(),
-            "marker.converters": MagicMock(),
-            "marker.converters.pdf": MagicMock(PdfConverter=mock_converter_cls),
-            "marker.models": MagicMock(create_model_dict=mock_create_models),
-            "marker.output": MagicMock(text_from_rendered=mock_text_from_rendered),
-        }):
-            doc = self.ingester.ingest(PDF_PATH)
-
-        assert isinstance(doc, Document)
-        assert doc.source.source_type == "pdf"
-        assert doc.source.extra.get("pdf_mode") == "high_fidelity"
-        assert doc.metadata.get("pdf_mode") == "high_fidelity"
-        assert "$O(n" in doc.content
-        # Should have sections from heading-based splitting
-        assert any("Chapter 1" in s.title for s in doc.sections)
-
-    def test_marker_mode_handles_empty_output(self):
-        set_active_pdf_mode("high_fidelity")
-
-        mock_converter_cls = MagicMock()
-        mock_converter_instance = MagicMock()
-        mock_converter_cls.return_value = mock_converter_instance
-        mock_rendered = MagicMock()
-        mock_converter_instance.return_value = mock_rendered
-        mock_create_models = MagicMock(return_value={})
-        mock_text_from_rendered = MagicMock(return_value=("", {}, []))
-
-        with patch.dict("sys.modules", {
-            "marker": MagicMock(),
-            "marker.converters": MagicMock(),
-            "marker.converters.pdf": MagicMock(PdfConverter=mock_converter_cls),
-            "marker.models": MagicMock(create_model_dict=mock_create_models),
-            "marker.output": MagicMock(text_from_rendered=mock_text_from_rendered),
-        }):
-            doc = self.ingester.ingest(PDF_PATH)
-
-        assert doc.content == ""
-
-    def test_marker_mode_extracts_images_count(self):
-        set_active_pdf_mode("high_fidelity")
-
-        mock_converter_cls = MagicMock()
-        mock_converter_instance = MagicMock()
-        mock_converter_cls.return_value = mock_converter_instance
-        mock_rendered = MagicMock()
-        mock_converter_instance.return_value = mock_rendered
-        mock_create_models = MagicMock(return_value={})
-
-        fake_images = [b"img1", b"img2", b"img3"]
-        mock_text_from_rendered = MagicMock(
-            return_value=("# Title\n\nContent", {}, fake_images)
-        )
-
-        with patch.dict("sys.modules", {
-            "marker": MagicMock(),
-            "marker.converters": MagicMock(),
-            "marker.converters.pdf": MagicMock(PdfConverter=mock_converter_cls),
-            "marker.models": MagicMock(create_model_dict=mock_create_models),
-            "marker.output": MagicMock(text_from_rendered=mock_text_from_rendered),
-        }):
-            doc = self.ingester.ingest(PDF_PATH)
-
-        assert doc.metadata.get("image_count") == 3
 
 
 class TestChandraBackend:
@@ -262,27 +164,6 @@ class TestSourceTypeConsistency:
         doc = self.ingester.ingest(PDF_PATH)
         assert doc.source.source_type == "pdf"
 
-    def test_marker_source_type_is_pdf(self):
-        set_active_pdf_mode("high_fidelity")
-
-        mock_converter_cls = MagicMock()
-        mock_converter_instance = MagicMock()
-        mock_converter_cls.return_value = mock_converter_instance
-        mock_rendered = MagicMock()
-        mock_converter_instance.return_value = mock_rendered
-        mock_create_models = MagicMock(return_value={})
-        mock_text_from_rendered = MagicMock(return_value=("# Test\n\nContent", {}, []))
-
-        with patch.dict("sys.modules", {
-            "marker": MagicMock(),
-            "marker.converters": MagicMock(),
-            "marker.converters.pdf": MagicMock(PdfConverter=mock_converter_cls),
-            "marker.models": MagicMock(create_model_dict=mock_create_models),
-            "marker.output": MagicMock(text_from_rendered=mock_text_from_rendered),
-        }):
-            doc = self.ingester.ingest(PDF_PATH)
-        assert doc.source.source_type == "pdf"
-
     def test_chandra_source_type_is_pdf(self):
         set_active_pdf_mode("max_accuracy")
 
@@ -317,7 +198,7 @@ class TestIngestPathPdfMode:
 
         config = IngestionConfig(
             supported_extensions=[".pdf"],
-            pdf_mode="high_fidelity",
+            pdf_mode="max_accuracy",
         )
         # CLI override to standard should use standard
         result = ingest_path(

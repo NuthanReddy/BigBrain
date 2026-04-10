@@ -22,7 +22,7 @@ from bigbrain.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 5
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS documents (
@@ -63,6 +63,77 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
     failed INTEGER NOT NULL DEFAULT 0,
     errors_json TEXT NOT NULL DEFAULT '[]',
     warnings_json TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS chunks (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    content TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
+    start_offset INTEGER NOT NULL DEFAULT 0,
+    end_offset INTEGER NOT NULL DEFAULT 0,
+    section_title TEXT NOT NULL DEFAULT '',
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(document_id, chunk_index)
+);
+
+CREATE TABLE IF NOT EXISTS summaries (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    chunk_id TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    summary_type TEXT NOT NULL DEFAULT 'document',
+    generated_by_provider TEXT NOT NULL DEFAULT '',
+    generated_by_model TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS entities (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    entity_type TEXT NOT NULL DEFAULT 'other',
+    description TEXT NOT NULL DEFAULT '',
+    source_chunk_id TEXT NOT NULL DEFAULT '',
+    generated_by_provider TEXT NOT NULL DEFAULT '',
+    generated_by_model TEXT NOT NULL DEFAULT '',
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS relationships (
+    id TEXT PRIMARY KEY,
+    source_entity_id TEXT NOT NULL,
+    target_entity_id TEXT NOT NULL,
+    relationship_type TEXT NOT NULL DEFAULT 'related_to',
+    description TEXT NOT NULL DEFAULT '',
+    document_id TEXT NOT NULL DEFAULT '',
+    generated_by_provider TEXT NOT NULL DEFAULT '',
+    generated_by_model TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 1.0,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS notion_sync (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    notion_page_id TEXT NOT NULL,
+    sync_direction TEXT NOT NULL DEFAULT 'bidirectional',
+    last_synced_at TEXT,
+    notion_last_edited TEXT,
+    local_last_edited TEXT,
+    status TEXT NOT NULL DEFAULT 'synced',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(document_id, notion_page_id)
+);
+
+CREATE TABLE IF NOT EXISTS file_hashes (
+    file_path TEXT PRIMARY KEY,
+    mtime REAL NOT NULL DEFAULT 0,
+    content_hash TEXT NOT NULL DEFAULT '',
+    last_ingested_at TEXT NOT NULL DEFAULT '',
+    document_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
@@ -162,7 +233,7 @@ class KBStore:
     # ------------------------------------------------------------------
 
     def _ensure_schema(self) -> None:
-        """Create tables/triggers if not present and set schema version."""
+        """Create tables/triggers if not present and run migrations."""
         with self._lock:
             self._conn.executescript(_SCHEMA_SQL)
             # executescript issues an implicit COMMIT and can reset PRAGMAs;
@@ -170,11 +241,59 @@ class KBStore:
             self._conn.execute("PRAGMA foreign_keys = ON")
             version = self._conn.execute("PRAGMA user_version").fetchone()[0]
             if version < _SCHEMA_VERSION:
+                self._run_migrations(version)
                 self._conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
                 self._conn.execute(
                     "INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')"
                 )
                 self._conn.commit()
+
+    def _run_migrations(self, from_version: int) -> None:
+        """Apply incremental schema migrations."""
+        if from_version < 3:
+            # v3: add content_hash column to chunks table
+            try:
+                self._conn.execute(
+                    "ALTER TABLE chunks ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
+                )
+                logger.info("Schema migration: added content_hash to chunks table")
+            except Exception:
+                pass  # Column already exists (fresh DB created with v3 schema)
+
+        if from_version < 4:
+            try:
+                self._conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS notion_sync (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                        notion_page_id TEXT NOT NULL,
+                        sync_direction TEXT NOT NULL DEFAULT 'bidirectional',
+                        last_synced_at TEXT,
+                        notion_last_edited TEXT,
+                        local_last_edited TEXT,
+                        status TEXT NOT NULL DEFAULT 'synced',
+                        metadata_json TEXT NOT NULL DEFAULT '{}',
+                        UNIQUE(document_id, notion_page_id)
+                    );
+                """)
+                logger.info("Schema migration: added notion_sync table")
+            except Exception:
+                pass
+
+        if from_version < 5:
+            try:
+                self._conn.execute("""
+                    CREATE TABLE IF NOT EXISTS file_hashes (
+                        file_path TEXT PRIMARY KEY,
+                        mtime REAL NOT NULL DEFAULT 0,
+                        content_hash TEXT NOT NULL DEFAULT '',
+                        last_ingested_at TEXT NOT NULL DEFAULT '',
+                        document_id TEXT NOT NULL DEFAULT ''
+                    )
+                """)
+                logger.info("Schema migration: added file_hashes table")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -410,6 +529,22 @@ class KBStore:
             ).fetchall()
             by_type = {row[0]: row[1] for row in type_rows}
 
+            total_chunks = self._conn.execute(
+                "SELECT COUNT(*) FROM chunks"
+            ).fetchone()[0]
+
+            total_summaries = self._conn.execute(
+                "SELECT COUNT(*) FROM summaries"
+            ).fetchone()[0]
+
+            total_entities = self._conn.execute(
+                "SELECT COUNT(*) FROM entities"
+            ).fetchone()[0]
+
+            total_relationships = self._conn.execute(
+                "SELECT COUNT(*) FROM relationships"
+            ).fetchone()[0]
+
             last_ok = self._conn.execute(
                 "SELECT * FROM ingestion_runs WHERE status = 'succeeded' "
                 "ORDER BY started_at DESC LIMIT 1"
@@ -437,10 +572,288 @@ class KBStore:
             "total_documents": total_docs,
             "total_sections": total_sections,
             "total_size_bytes": total_size,
+            "total_chunks": total_chunks,
+            "total_summaries": total_summaries,
+            "total_entities": total_entities,
+            "total_relationships": total_relationships,
             "by_type": by_type,
             "last_successful_run": _run_dict(last_ok),
             "last_failed_run": _run_dict(last_fail),
         }
+
+    # ------------------------------------------------------------------
+    # Chunks
+    # ------------------------------------------------------------------
+
+    def save_chunks(self, chunks: list) -> int:
+        """Save chunks for a document. Replaces existing chunks. Returns count saved."""
+        if not chunks:
+            return 0
+        doc_id = chunks[0].document_id
+        with self._lock:
+            with self._conn:
+                self._conn.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
+                for chunk in chunks:
+                    self._conn.execute(
+                        "INSERT INTO chunks (id, document_id, content, content_hash, "
+                        "start_offset, end_offset, section_title, chunk_index, metadata_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            chunk.id, chunk.document_id, chunk.content,
+                            chunk.content_hash,
+                            chunk.start_offset, chunk.end_offset,
+                            chunk.section_title, chunk.chunk_index,
+                            json.dumps(chunk.metadata, default=str),
+                        ),
+                    )
+        return len(chunks)
+
+    def get_chunks(self, document_id: str) -> list:
+        """Get all chunks for a document."""
+        from bigbrain.distill.models import Chunk
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, document_id, content, content_hash, start_offset, "
+                "end_offset, section_title, chunk_index, metadata_json "
+                "FROM chunks WHERE document_id = ? ORDER BY chunk_index",
+                (document_id,),
+            ).fetchall()
+        return [
+            Chunk(
+                id=r[0], document_id=r[1], content=r[2],
+                content_hash=r[3],
+                start_offset=r[4], end_offset=r[5],
+                section_title=r[6], chunk_index=r[7],
+                metadata=json.loads(r[8]),
+            )
+            for r in rows
+        ]
+
+    def get_chunk_hashes(self, document_id: str) -> dict[int, str]:
+        """Get a mapping of chunk_index → content_hash for a document.
+        
+        Used for incremental distillation — compare new chunk hashes
+        against stored ones to skip unchanged chunks.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT chunk_index, content_hash FROM chunks WHERE document_id = ?",
+                (document_id,),
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    # ------------------------------------------------------------------
+    # Summaries
+    # ------------------------------------------------------------------
+
+    def save_summaries(self, summaries: list) -> int:
+        """Save summaries. Returns count saved."""
+        with self._lock:
+            with self._conn:
+                for s in summaries:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO summaries (id, document_id, chunk_id, "
+                        "content, summary_type, generated_by_provider, generated_by_model, "
+                        "created_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            s.id, s.document_id, s.chunk_id, s.content,
+                            s.summary_type, s.generated_by_provider,
+                            s.generated_by_model,
+                            s.created_at.isoformat() if hasattr(s.created_at, "isoformat") else str(s.created_at),
+                            json.dumps(s.metadata, default=str),
+                        ),
+                    )
+        return len(summaries)
+
+    def get_summaries(self, document_id: str) -> list:
+        """Get all summaries for a document."""
+        from bigbrain.distill.models import Summary
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, document_id, chunk_id, content, summary_type, "
+                "generated_by_provider, generated_by_model, created_at, metadata_json "
+                "FROM summaries WHERE document_id = ? ORDER BY summary_type",
+                (document_id,),
+            ).fetchall()
+        return [
+            Summary(
+                id=r[0], document_id=r[1], chunk_id=r[2], content=r[3],
+                summary_type=r[4], generated_by_provider=r[5],
+                generated_by_model=r[6], metadata=json.loads(r[8]),
+            )
+            for r in rows
+        ]
+
+    # ------------------------------------------------------------------
+    # Entities
+    # ------------------------------------------------------------------
+
+    def save_entities(self, entities: list) -> int:
+        """Save entities. Returns count saved."""
+        with self._lock:
+            with self._conn:
+                for e in entities:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO entities (id, document_id, name, "
+                        "entity_type, description, source_chunk_id, "
+                        "generated_by_provider, generated_by_model, metadata_json) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            e.id, e.document_id, e.name, e.entity_type,
+                            e.description, e.source_chunk_id,
+                            e.generated_by_provider, e.generated_by_model,
+                            json.dumps(e.metadata, default=str),
+                        ),
+                    )
+        return len(entities)
+
+    def get_entities(self, document_id: str) -> list:
+        """Get all entities for a document."""
+        from bigbrain.distill.models import Entity
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, document_id, name, entity_type, description, "
+                "source_chunk_id, generated_by_provider, generated_by_model, "
+                "metadata_json FROM entities WHERE document_id = ? ORDER BY name",
+                (document_id,),
+            ).fetchall()
+        return [
+            Entity(
+                id=r[0], document_id=r[1], name=r[2], entity_type=r[3],
+                description=r[4], source_chunk_id=r[5],
+                generated_by_provider=r[6], generated_by_model=r[7],
+                metadata=json.loads(r[8]),
+            )
+            for r in rows
+        ]
+
+    def list_all_entities(
+        self,
+        *,
+        entity_type: str = "",
+        search: str = "",
+        limit: int = 500,
+    ) -> list:
+        """List all entities across all documents with optional filters."""
+        from bigbrain.distill.models import Entity
+
+        conditions = []
+        params: list = []
+
+        if entity_type:
+            conditions.append("entity_type = ?")
+            params.append(entity_type)
+        if search:
+            conditions.append("(name LIKE ? OR description LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%"])
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(limit)
+
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT id, document_id, name, entity_type, description, "
+                f"source_chunk_id, generated_by_provider, generated_by_model, "
+                f"metadata_json FROM entities {where} ORDER BY entity_type, name LIMIT ?",
+                params,
+            ).fetchall()
+        return [
+            Entity(
+                id=r[0], document_id=r[1], name=r[2], entity_type=r[3],
+                description=r[4], source_chunk_id=r[5],
+                generated_by_provider=r[6], generated_by_model=r[7],
+                metadata=json.loads(r[8]),
+            )
+            for r in rows
+        ]
+
+    def get_entity_types(self) -> list[tuple[str, int]]:
+        """Return all entity types with counts, sorted by count descending."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT entity_type, COUNT(*) FROM entities GROUP BY entity_type ORDER BY COUNT(*) DESC"
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def dedup_entities(self) -> int:
+        """Remove duplicate entities (same name+type, keep longest description).
+        
+        Returns count of removed duplicates.
+        """
+        with self._lock:
+            # Find duplicates: group by lowercase name + entity_type
+            rows = self._conn.execute(
+                "SELECT id, LOWER(TRIM(name)), entity_type, LENGTH(description) "
+                "FROM entities ORDER BY LOWER(TRIM(name)), entity_type, LENGTH(description) DESC"
+            ).fetchall()
+
+        # Group by (normalized_name, type), keep the one with longest description
+        seen: dict[tuple[str, str], str] = {}  # (name, type) → best id
+        to_delete: list[str] = []
+
+        for row_id, name, etype, desc_len in rows:
+            key = (name, etype)
+            if key not in seen:
+                seen[key] = row_id
+            else:
+                to_delete.append(row_id)
+
+        if to_delete:
+            with self._lock:
+                with self._conn:
+                    for eid in to_delete:
+                        self._conn.execute("DELETE FROM entities WHERE id = ?", (eid,))
+            logger.info("Deduplicated entities: removed %d duplicates", len(to_delete))
+
+        return len(to_delete)
+
+    # ------------------------------------------------------------------
+    # Relationships
+    # ------------------------------------------------------------------
+
+    def save_relationships(self, relationships: list) -> int:
+        """Save relationships. Returns count saved."""
+        with self._lock:
+            with self._conn:
+                for r in relationships:
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO relationships (id, source_entity_id, "
+                        "target_entity_id, relationship_type, description, document_id, "
+                        "generated_by_provider, generated_by_model, confidence, "
+                        "metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            r.id, r.source_entity_id, r.target_entity_id,
+                            r.relationship_type, r.description, r.document_id,
+                            r.generated_by_provider, r.generated_by_model,
+                            r.confidence, json.dumps(r.metadata, default=str),
+                        ),
+                    )
+        return len(relationships)
+
+    def get_relationships(self, document_id: str) -> list:
+        """Get all relationships for a document."""
+        from bigbrain.distill.models import Relationship
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, source_entity_id, target_entity_id, relationship_type, "
+                "description, document_id, generated_by_provider, generated_by_model, "
+                "confidence, metadata_json "
+                "FROM relationships WHERE document_id = ? ORDER BY relationship_type",
+                (document_id,),
+            ).fetchall()
+        return [
+            Relationship(
+                id=r[0], source_entity_id=r[1], target_entity_id=r[2],
+                relationship_type=r[3], description=r[4], document_id=r[5],
+                generated_by_provider=r[6], generated_by_model=r[7],
+                confidence=r[8], metadata=json.loads(r[9]),
+            )
+            for r in rows
+        ]
 
     # ------------------------------------------------------------------
     # JSONL export / import
@@ -661,3 +1074,144 @@ class KBStore:
             metadata=json.loads(metadata_json),
             created_at=_iso_to_dt(created_at) or datetime.now(timezone.utc),
         )
+
+    # ------------------------------------------------------------------
+    # Notion Sync
+    # ------------------------------------------------------------------
+
+    def save_sync_mapping(self, document_id: str, notion_page_id: str, **kwargs) -> None:
+        """Save or update a document↔Notion page sync mapping."""
+        now = _utcnow()
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO notion_sync (document_id, notion_page_id, sync_direction, "
+                    "last_synced_at, notion_last_edited, local_last_edited, status, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(document_id, notion_page_id) DO UPDATE SET "
+                    "last_synced_at = excluded.last_synced_at, "
+                    "notion_last_edited = excluded.notion_last_edited, "
+                    "local_last_edited = excluded.local_last_edited, "
+                    "status = excluded.status, "
+                    "metadata_json = excluded.metadata_json",
+                    (
+                        document_id, notion_page_id,
+                        kwargs.get("sync_direction", "bidirectional"),
+                        now,
+                        kwargs.get("notion_last_edited", ""),
+                        kwargs.get("local_last_edited", ""),
+                        kwargs.get("status", "synced"),
+                        json.dumps(kwargs.get("metadata", {}), default=str),
+                    ),
+                )
+
+    def get_sync_mapping(self, document_id: str) -> dict | None:
+        """Get the Notion sync mapping for a document."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT document_id, notion_page_id, sync_direction, last_synced_at, "
+                "notion_last_edited, local_last_edited, status, metadata_json "
+                "FROM notion_sync WHERE document_id = ?",
+                (document_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "document_id": row[0], "notion_page_id": row[1],
+            "sync_direction": row[2], "last_synced_at": row[3],
+            "notion_last_edited": row[4], "local_last_edited": row[5],
+            "status": row[6], "metadata": json.loads(row[7]),
+        }
+
+    def get_sync_by_notion_id(self, notion_page_id: str) -> dict | None:
+        """Get sync mapping by Notion page ID."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT document_id, notion_page_id, sync_direction, last_synced_at, "
+                "notion_last_edited, local_last_edited, status, metadata_json "
+                "FROM notion_sync WHERE notion_page_id = ?",
+                (notion_page_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "document_id": row[0], "notion_page_id": row[1],
+            "sync_direction": row[2], "last_synced_at": row[3],
+            "notion_last_edited": row[4], "local_last_edited": row[5],
+            "status": row[6], "metadata": json.loads(row[7]),
+        }
+
+    def list_sync_mappings(self) -> list[dict]:
+        """List all Notion sync mappings."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT document_id, notion_page_id, sync_direction, last_synced_at, "
+                "notion_last_edited, local_last_edited, status, metadata_json "
+                "FROM notion_sync ORDER BY last_synced_at DESC"
+            ).fetchall()
+        return [
+            {
+                "document_id": r[0], "notion_page_id": r[1],
+                "sync_direction": r[2], "last_synced_at": r[3],
+                "notion_last_edited": r[4], "local_last_edited": r[5],
+                "status": r[6], "metadata": json.loads(r[7]),
+            }
+            for r in rows
+        ]
+
+    def delete_sync_mapping(self, document_id: str) -> bool:
+        """Remove a sync mapping."""
+        with self._lock:
+            with self._conn:
+                cur = self._conn.execute(
+                    "DELETE FROM notion_sync WHERE document_id = ?", (document_id,)
+                )
+            return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # File hash tracking (incremental ingestion)
+    # ------------------------------------------------------------------
+
+    def save_file_hash(self, file_path: str, mtime: float, content_hash: str, document_id: str = "") -> None:
+        """Save or update a file hash record for change tracking."""
+        now = _utcnow()
+        with self._lock:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO file_hashes (file_path, mtime, content_hash, last_ingested_at, document_id) "
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(file_path) DO UPDATE SET "
+                    "mtime = excluded.mtime, content_hash = excluded.content_hash, "
+                    "last_ingested_at = excluded.last_ingested_at, document_id = excluded.document_id",
+                    (file_path, mtime, content_hash, now, document_id),
+                )
+
+    def get_file_hashes(self) -> dict[str, dict]:
+        """Get all file hash records. Returns {file_path: {mtime, content_hash, document_id}}."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT file_path, mtime, content_hash, last_ingested_at, document_id FROM file_hashes"
+            ).fetchall()
+        return {
+            r[0]: {"mtime": r[1], "content_hash": r[2], "last_ingested_at": r[3], "document_id": r[4]}
+            for r in rows
+        }
+
+    def get_file_hash(self, file_path: str) -> dict | None:
+        """Get a single file hash record."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT file_path, mtime, content_hash, last_ingested_at, document_id "
+                "FROM file_hashes WHERE file_path = ?",
+                (file_path,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"file_path": row[0], "mtime": row[1], "content_hash": row[2], "last_ingested_at": row[3], "document_id": row[4]}
+
+    def delete_file_hash(self, file_path: str) -> bool:
+        """Remove a file hash record."""
+        with self._lock:
+            with self._conn:
+                cur = self._conn.execute("DELETE FROM file_hashes WHERE file_path = ?", (file_path,))
+            return cur.rowcount > 0

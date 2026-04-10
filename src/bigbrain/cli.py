@@ -1115,9 +1115,9 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     )
     p.add_argument(
         "--pdf-mode",
-        choices=["standard", "high_fidelity", "max_accuracy"],
+        choices=["standard", "max_accuracy"],
         default=None,
-        help="PDF extraction mode: standard (PyMuPDF), high_fidelity (marker-pdf), max_accuracy (chandra-ocr)",
+        help="PDF extraction mode: standard (PyMuPDF+Tesseract), max_accuracy (chandra-ocr)",
     )
     p.set_defaults(func=_handle_ingest)
     return p

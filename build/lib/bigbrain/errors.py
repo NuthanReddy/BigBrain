@@ -59,6 +59,10 @@ class ProviderError(UserError):
         super().__init__(msg)
 
 
+class NotionError(UserError):
+    """Error communicating with the Notion API."""
+
+
 class NoProviderAvailableError(ProviderError):
     """Raised when no AI provider is available or reachable."""
 
