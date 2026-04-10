@@ -16,6 +16,15 @@ from typing import Sequence
 # Stub handlers – one per subcommand
 # ---------------------------------------------------------------------------
 
+
+def _resolve_doc_id(store: object, prefix: str) -> str | None:
+    """Resolve a doc ID prefix to full ID. Returns full ID or None."""
+    doc = store.get_document(prefix)  # type: ignore[union-attr]
+    if doc:
+        return prefix
+    resolved = store.resolve_doc_id(prefix)  # type: ignore[union-attr]
+    return resolved
+
 def _handle_ingest(args: argparse.Namespace) -> int:
     """Run the ingestion pipeline on the specified path."""
     from bigbrain.ingest.service import ingest_path
@@ -189,8 +198,13 @@ def _handle_distill(args: argparse.Namespace) -> int:
             steps = {step_arg} if step_arg else None
 
             if args.doc_id:
-                print(f"Distilling document: {args.doc_id}{f' (step: {step_arg})' if step_arg else ''}")
-                result = pipeline.distill_by_id(args.doc_id, model=model, force=force, steps=steps)
+                doc_id = args.doc_id
+                # Resolve prefix to full ID
+                full_id = pipeline.store.resolve_doc_id(doc_id) if not pipeline.store.get_document(doc_id) else doc_id
+                if full_id:
+                    doc_id = full_id
+                print(f"Distilling document: {doc_id}{f' (step: {step_arg})' if step_arg else ''}")
+                result = pipeline.distill_by_id(doc_id, model=model, force=force, steps=steps)
                 if result is None:
                     print(f"Document not found: {args.doc_id}")
                     return 1
@@ -289,9 +303,13 @@ def _handle_compile(args: argparse.Namespace) -> int:
     try:
         with CompilePipeline.from_config(cfg) as pipeline:
             if args.doc_id:
-                print(f"Compiling {args.doc_id} as {fmt}...")
+                doc_id = args.doc_id
+                full_id = _resolve_doc_id(pipeline.store, doc_id)
+                if full_id:
+                    doc_id = full_id
+                print(f"Compiling {doc_id} as {fmt}...")
                 result = pipeline.compile_document(
-                    args.doc_id, format=fmt, model=model, output_path=output,
+                    doc_id, format=fmt, model=model, output_path=output,
                 )
                 if result is None:
                     print(f"Document not found: {args.doc_id}")
@@ -736,7 +754,11 @@ def _handle_distill_show(args: argparse.Namespace) -> int:
     with KBStore(db_path) as store:
         if args.doc_id:
             docs = []
-            doc = store.get_document(args.doc_id)
+            doc_id = args.doc_id
+            full_id = _resolve_doc_id(store, doc_id)
+            if full_id:
+                doc_id = full_id
+            doc = store.get_document(doc_id)
             if doc:
                 docs = [doc]
             else:

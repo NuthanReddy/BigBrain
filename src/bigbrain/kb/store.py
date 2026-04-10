@@ -392,6 +392,20 @@ class KBStore:
                 return None
             return self._row_to_document(row)
 
+    def resolve_doc_id(self, prefix: str) -> str | None:
+        """Resolve a doc ID prefix to a full ID.
+
+        Returns the full ID if exactly one document matches the prefix,
+        or ``None`` if zero or multiple documents match.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM documents WHERE id LIKE ? || '%'", (prefix,)
+            ).fetchall()
+        if len(rows) == 1:
+            return rows[0][0]
+        return None
+
     def get_document_by_source_path(self, file_path: str) -> Document | None:
         """Retrieve a document by its original source file path."""
         doc_id = self.make_document_id(file_path)
