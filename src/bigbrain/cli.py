@@ -653,13 +653,48 @@ def _handle_status(args: argparse.Namespace) -> int:
         for stype, count in sorted(stats['by_type'].items()):
             print(f"  .{stype}: {count} document(s)")
 
-    # Document listing with IDs
+    # Document listing with IDs and details
     if docs:
         print()
         print("Documents:")
         for doc in docs:
-            stype = f" [{doc.source.source_type}]" if doc.source else ""
-            print(f"  {doc.id}  {doc.title}{stype}")
+            stype = doc.source.source_type if doc.source else "?"
+            size = doc.source.size_bytes if doc.source else 0
+            if size >= 1_048_576:
+                size_str = f"{size / 1_048_576:.1f} MB"
+            elif size >= 1024:
+                size_str = f"{size / 1024:.1f} KB"
+            else:
+                size_str = f"{size} B"
+
+            sec_count = len(doc.sections) if doc.sections else 0
+            print(f"  {doc.id}  {doc.title}")
+            print(f"    type: {stype}  sections: {sec_count}  size: {size_str}")
+
+            # Show extra metadata for PDFs
+            extra = doc.source.extra if doc.source and doc.source.extra else {}
+            meta = doc.metadata or {}
+            details: list[str] = []
+
+            pdf_mode = extra.get("pdf_mode") or meta.get("pdf_mode")
+            if pdf_mode:
+                details.append(f"pdf_mode: {pdf_mode}")
+
+            ocr_pages = meta.get("ocr_pages") or extra.get("ocr_pages")
+            if ocr_pages and int(ocr_pages) > 0:
+                details.append(f"ocr_pages: {ocr_pages}")
+
+            imgs_found = meta.get("images_found") or extra.get("images_found")
+            if imgs_found and int(imgs_found) > 0:
+                imgs_ocrd = meta.get("images_ocrd") or extra.get("images_ocrd", 0)
+                details.append(f"images: {imgs_found} found, {imgs_ocrd} OCR'd")
+
+            page_count = meta.get("page_count")
+            if page_count:
+                details.append(f"pages: {page_count}")
+
+            if details:
+                print(f"    {' | '.join(details)}")
 
     # Last runs
     if stats.get('last_successful_run'):
