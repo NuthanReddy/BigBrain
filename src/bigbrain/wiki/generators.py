@@ -13,9 +13,48 @@ from bigbrain.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+_EXPAND_SYSTEM = (
+    "You are a knowledgeable technical writer. "
+    "Write clear, detailed explanations of concepts, algorithms, and definitions."
+)
+
+_EXPAND_TEMPLATE = (
+    "Write 2-4 paragraphs explaining the following {entity_type} in detail:\n\n"
+    "Name: {name}\n"
+    "Brief description: {description}\n"
+    "{details_section}"
+    "\nExplanation:"
+)
+
 
 class EntityPageGenerator:
     """Generates a wiki page for a single entity."""
+
+    def __init__(self, registry: Any | None = None) -> None:
+        self._registry = registry
+
+    def _ai_expand(self, entity: Entity, *, model: str = "") -> str:
+        """Use AI to expand an entity description into a detailed overview."""
+        if self._registry is None:
+            return ""
+        details = entity.metadata.get("details", "") if entity.metadata else ""
+        details_section = f"Additional details: {details}\n" if details else ""
+        prompt = _EXPAND_TEMPLATE.format(
+            entity_type=entity.entity_type or "concept",
+            name=entity.name,
+            description=entity.description or "N/A",
+            details_section=details_section,
+        )
+        messages = [
+            {"role": "system", "content": _EXPAND_SYSTEM},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            resp = self._registry.chat(messages, model=model)
+            return resp.text.strip()
+        except Exception as exc:
+            logger.warning("AI expand failed for entity '%s': %s", entity.name, exc)
+            return ""
 
     def generate(
         self,
@@ -23,14 +62,28 @@ class EntityPageGenerator:
         related_entities: list[Entity] | None = None,
         relationships: list[Relationship] | None = None,
         all_entities: dict[str, Entity] | None = None,
+        *,
+        enrich: bool = False,
+        model: str = "",
     ) -> WikiPage:
         slug = make_entity_slug(entity.name, entity.entity_type)
 
         sections = []
 
-        # Description
-        if entity.description:
+        # Overview / Description
+        expanded = ""
+        if enrich and self._registry is not None:
+            expanded = self._ai_expand(entity, model=model)
+
+        if expanded:
+            sections.append(f"## Overview\n\n{expanded}")
+        elif entity.description:
             sections.append(f"## Description\n\n{entity.description}")
+
+        # Details from metadata
+        details = entity.metadata.get("details", "") if entity.metadata else ""
+        if details:
+            sections.append(f"## Details\n\n{details}")
 
         # Type badge
         if entity.entity_type:
@@ -53,6 +106,12 @@ class EntityPageGenerator:
                         rel_lines.append(f"- {link} → {r.relationship_type.replace('_', ' ')}")
             if rel_lines:
                 sections.append("## Relationships\n\n" + "\n".join(rel_lines))
+
+        # Related entities from metadata
+        meta_related = entity.metadata.get("related", []) if entity.metadata else []
+        if meta_related:
+            related_links = [f"- {title_to_wikilink(name)}" for name in meta_related[:5]]
+            sections.append("## Related Topics\n\n" + "\n".join(related_links))
 
         # Related entities (same type or same document)
         if related_entities:
@@ -97,9 +156,26 @@ class SourcePageGenerator:
             sections.append(f"**Size:** {doc.source.size_bytes:,} bytes")
 
         # Summary
+        doc_summaries = []
+        section_summaries = []
         if summaries:
-            sections.append("## Summary\n")
             for s in summaries:
+                if s.summary_type == "section":
+                    section_summaries.append(s)
+                else:
+                    doc_summaries.append(s)
+
+        if doc_summaries:
+            sections.append("## Summary\n")
+            for s in doc_summaries:
+                sections.append(s.content)
+
+        # Section-level summaries
+        if section_summaries:
+            sections.append("## Section Summaries\n")
+            for s in sorted(section_summaries, key=lambda x: x.metadata.get("section_index", 0)):
+                title = s.metadata.get("section_title", "Untitled section")
+                sections.append(f"### {title}\n")
                 sections.append(s.content)
 
         # Key entities from this source

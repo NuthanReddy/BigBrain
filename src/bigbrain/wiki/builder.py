@@ -41,10 +41,16 @@ class WikiBuilder:
         builder.close()
     """
 
-    def __init__(self, store: KBStore, wiki_dir: str | Path = _DEFAULT_WIKI_DIR) -> None:
+    def __init__(
+        self,
+        store: KBStore,
+        wiki_dir: str | Path = _DEFAULT_WIKI_DIR,
+        registry: Any | None = None,
+    ) -> None:
         self._store = store
         self._writer = WikiWriter(wiki_dir)
-        self._entity_gen = EntityPageGenerator()
+        self._registry = registry
+        self._entity_gen = EntityPageGenerator(registry=registry)
         self._source_gen = SourcePageGenerator()
         self._overview_gen = OverviewPageGenerator()
 
@@ -53,7 +59,13 @@ class WikiBuilder:
         if config is None:
             config = load_config()
         store = KBStore(config.kb_db_path)
-        return cls(store=store)
+        registry = None
+        try:
+            from bigbrain.providers.registry import ProviderRegistry
+            registry = ProviderRegistry.from_app_config(config)
+        except Exception as exc:
+            logger.debug("Could not create ProviderRegistry for wiki enrichment: %s", exc)
+        return cls(store=store, registry=registry)
 
     def close(self) -> None:
         self._store.close()
@@ -64,13 +76,23 @@ class WikiBuilder:
     def __exit__(self, *args: Any) -> None:
         self.close()
 
-    def build(self, *, doc_id: str = "", clean: bool = False, dry_run: bool = False) -> WikiBuildResult:
+    def build(
+        self,
+        *,
+        doc_id: str = "",
+        clean: bool = False,
+        dry_run: bool = False,
+        enrich: bool = False,
+        model: str = "",
+    ) -> WikiBuildResult:
         """Build the complete wiki from KB data.
 
         Args:
             doc_id: If set, only build pages related to this document.
             clean: Remove wiki files not in the generated set.
             dry_run: Generate pages but don't write to disk.
+            enrich: Use AI to expand entity descriptions on wiki pages.
+            model: Override AI model for enrichment.
         """
         result = WikiBuildResult()
         pages: list[WikiPage] = []
@@ -121,6 +143,8 @@ class WikiBuilder:
                     related_entities=related,
                     relationships=entity_rels,
                     all_entities=all_entities,
+                    enrich=enrich,
+                    model=model,
                 )
 
                 if page.slug not in seen_slugs:

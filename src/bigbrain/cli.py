@@ -2121,12 +2121,16 @@ def _handle_wiki(args: argparse.Namespace) -> int:
         doc_id = getattr(args, 'doc_id', '') or ''
         clean = getattr(args, 'clean', False)
         dry_run = getattr(args, 'dry_run', False)
+        enrich = getattr(args, 'enrich', False)
+        model = getattr(args, 'model', '') or ''
 
         mode = "dry run" if dry_run else ("clean" if clean else "incremental")
+        if enrich:
+            mode += " + AI enrichment"
         print(f"Building wiki ({mode})...")
 
         with WikiBuilder.from_config(cfg) as builder:
-            result = builder.build(doc_id=doc_id, clean=clean, dry_run=dry_run)
+            result = builder.build(doc_id=doc_id, clean=clean, dry_run=dry_run, enrich=enrich, model=model)
 
         print()
         print(f"Wiki build complete:")
@@ -2183,6 +2187,8 @@ def _add_wiki_parser(subparsers: argparse._SubParsersAction) -> argparse.Argumen
     p.add_argument("--doc-id", type=str, default="", help="Build only for a specific document")
     p.add_argument("--clean", action="store_true", default=False, help="Remove orphan wiki files not in current build")
     p.add_argument("--dry-run", action="store_true", default=False, help="Show what would be built without writing files")
+    p.add_argument("--enrich", action="store_true", default=False, help="Use AI to expand entity descriptions on wiki pages")
+    p.add_argument("--model", type=str, default="", help="Override AI model for wiki enrichment")
     p.set_defaults(func=_handle_wiki)
     return p
 

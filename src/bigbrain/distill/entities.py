@@ -16,11 +16,15 @@ EXTRACT_SYSTEM = (
     "Return ONLY valid JSON."
 )
 
-EXTRACT_TEMPLATE = '''Extract the key entities and concepts from the following text.
+EXTRACT_TEMPLATE = '''Extract key entities and concepts from the following text.
 Return a JSON array where each item has:
 - "name": the entity/concept name
-- "type": one of "algorithm", "data_structure", "concept", "theorem", "person", "definition", "technique", "property", "other"
-- "description": a brief one-sentence description
+- "type": one of "algorithm", "data_structure", "concept", "theorem", "person", "definition", "technique", "property", "formula", "example", "other"
+- "description": a detailed 2-3 sentence description explaining what this is and why it matters
+- "details": additional context — for algorithms include time/space complexity; for theorems include the statement; for data structures include key operations and properties; for definitions include the formal definition. Use empty string if not applicable.
+- "related": array of other entity names from the text that this is related to (max 5)
+
+Be thorough. Extract ALL important entities including definitions, theorems with statements, algorithms with complexity, data structures with operations, key properties, named techniques, and important examples.
 
 Text:
 {text}
@@ -61,6 +65,10 @@ class EntityExtractor:
                     source_chunk_id=chunk.id,
                     generated_by_provider=resp.provider,
                     generated_by_model=resp.model,
+                    metadata={
+                        "details": item.get("details", ""),
+                        "related": item.get("related", []),
+                    },
                 )
             )
 

@@ -89,3 +89,32 @@ class Summarizer:
             except Exception as exc:
                 logger.warning("Failed to summarize chunk %s: %s", chunk.id, exc)
         return summaries
+
+    def summarize_sections(
+        self, doc: Document, *, max_length: int = 300, model: str = ""
+    ) -> list[Summary]:
+        """Generate a summary for each document section with enough content."""
+        summaries: list[Summary] = []
+        for i, section in enumerate(doc.sections):
+            if len(section.content.strip()) < 100:
+                continue
+            try:
+                prompt = SUMMARIZE_CHUNK_TEMPLATE.format(
+                    content=section.content[:4000], max_length=max_length
+                )
+                messages = [
+                    {"role": "system", "content": SUMMARIZE_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ]
+                resp = self._registry.chat(messages, model=model)
+                summaries.append(Summary(
+                    document_id=doc.id,
+                    content=resp.text,
+                    summary_type="section",
+                    generated_by_provider=resp.provider,
+                    generated_by_model=resp.model,
+                    metadata={"section_title": section.title, "section_index": i},
+                ))
+            except Exception as exc:
+                logger.warning("Section summary failed for '%s': %s", section.title, exc)
+        return summaries
