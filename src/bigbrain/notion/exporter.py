@@ -28,45 +28,39 @@ class NotionExporter:
         include_entities: bool = True,
         include_relationships: bool = True,
     ) -> str | None:
-        """Export a document to Notion. Returns the Notion page ID or None on failure.
+        """Export a document to Notion as a parent page with child pages per chunk.
 
-        If a sync mapping exists, updates the existing page.
-        Otherwise, creates a new page under parent_page_id.
+        Creates a top-level page with summary/overview, then a child page
+        for each chunk with its entities and content.
         """
         doc = self._store.get_document(doc_id)
         if doc is None:
             logger.warning("Document not found: %s", doc_id)
             return None
 
-        blocks = self._build_blocks(
-            doc, include_summary, include_entities, include_relationships,
-        )
-
         mapping = self._store.get_sync_mapping(doc_id)
 
         if mapping and mapping.get("notion_page_id"):
             notion_page_id = mapping["notion_page_id"]
+            logger.info("Updating existing Notion page %s for %s", notion_page_id, doc.title)
             try:
+                blocks = self._build_overview_blocks(doc, include_summary, include_entities, include_relationships)
                 self._client.update_page_blocks(notion_page_id, blocks)
-                logger.info("Updated Notion page %s for doc %s", notion_page_id, doc.title)
             except Exception as exc:
                 logger.error("Failed to update Notion page %s: %s", notion_page_id, exc)
                 return None
         else:
             if not parent_page_id:
-                logger.error(
-                    "No parent_page_id specified and no existing sync mapping for %s",
-                    doc_id,
-                )
+                logger.error("No parent_page_id for %s", doc_id)
                 return None
+
+            # Create parent page with overview
+            overview_blocks = self._build_overview_blocks(doc, include_summary, include_entities, include_relationships)
             try:
-                # Notion API limits children to 100 blocks per request
-                first_batch = blocks[:100]
-                remaining = blocks[100:]
+                first_batch = overview_blocks[:100]
+                remaining = overview_blocks[100:]
                 page = self._client.create_page(parent_page_id, doc.title, children=first_batch)
                 notion_page_id = page["id"]
-
-                # Append remaining blocks in batches of 100
                 while remaining:
                     batch = remaining[:100]
                     remaining = remaining[100:]
@@ -74,14 +68,42 @@ class NotionExporter:
                         self._client._client.blocks.children.append(
                             block_id=notion_page_id, children=batch,
                         )
-                    except Exception as exc:
-                        logger.warning("Failed to append block batch: %s", exc)
+                    except Exception:
                         break
-
-                logger.info("Created Notion page %s for doc %s (%d blocks)", notion_page_id, doc.title, len(blocks))
+                logger.info("Created parent page %s for %s", notion_page_id, doc.title)
             except Exception as exc:
                 logger.error("Failed to create Notion page for %s: %s", doc.title, exc)
                 return None
+
+        # Create child pages per chunk (section-level content)
+        chunks = self._store.get_chunks(doc_id)
+        if chunks:
+            entities_by_chunk: dict[str, list] = {}
+            all_entities = self._store.get_entities(doc_id)
+            for e in all_entities:
+                if e.source_chunk_id:
+                    entities_by_chunk.setdefault(e.source_chunk_id, []).append(e)
+
+            for chunk in chunks:
+                title = chunk.section_title or f"Section {chunk.chunk_index + 1}"
+                try:
+                    chunk_blocks = self._build_chunk_blocks(chunk, entities_by_chunk.get(chunk.id, []))
+                    first_batch = chunk_blocks[:100]
+                    remaining_blocks = chunk_blocks[100:]
+                    child = self._client.create_page(notion_page_id, title, children=first_batch)
+                    child_id = child["id"]
+                    while remaining_blocks:
+                        batch = remaining_blocks[:100]
+                        remaining_blocks = remaining_blocks[100:]
+                        try:
+                            self._client._client.blocks.children.append(
+                                block_id=child_id, children=batch,
+                            )
+                        except Exception:
+                            break
+                    logger.debug("Created child page '%s' under %s", title, doc.title)
+                except Exception as exc:
+                    logger.warning("Failed to create child page '%s': %s", title, exc)
 
         self._store.save_sync_mapping(
             document_id=doc_id,
@@ -114,7 +136,7 @@ class NotionExporter:
                 page_ids.append(pid)
         return page_ids
 
-    def _build_blocks(
+    def _build_overview_blocks(
         self,
         doc: Document,
         include_summary: bool,
@@ -177,6 +199,46 @@ class NotionExporter:
                     src = entity_map.get(r.source_entity_id, "?")
                     tgt = entity_map.get(r.target_entity_id, "?")
                     blocks.append(_bulleted(f"{src} \u2192 {r.relationship_type} \u2192 {tgt}"))
+
+        return blocks
+
+    @staticmethod
+    def _build_chunk_blocks(chunk: Any, entities: list) -> list[dict]:
+        """Build blocks for a chunk child page."""
+        blocks: list[dict] = []
+
+        # BigBrain marker
+        blocks.append({
+            "object": "block",
+            "type": "callout",
+            "callout": {
+                "icon": {"type": "emoji", "emoji": "🧠"},
+                "rich_text": [{"type": "text", "text": {"content": "Generated by BigBrain — auto-imported pages will skip this page."}}],
+                "color": "gray_background",
+            },
+        })
+
+        # Chunk content as paragraphs
+        content = getattr(chunk, "content", "") or ""
+        if content:
+            for para in _split_text(content, max_len=1900):
+                blocks.append(_paragraph(para))
+
+        # Entities from this chunk
+        if entities:
+            blocks.append(_divider())
+            blocks.append(_heading("Key Concepts", level=2))
+            for e in sorted(entities, key=lambda x: x.name):
+                desc = f" — {e.description}" if e.description else ""
+                details = ""
+                if e.metadata:
+                    d = e.metadata.get("details", "")
+                    if d:
+                        details = f"\n{d}"
+                blocks.append(_bulleted(f"**{e.name}**{desc}"))
+                if details:
+                    for para in _split_text(details.strip(), max_len=1900):
+                        blocks.append(_paragraph(para))
 
         return blocks
 
