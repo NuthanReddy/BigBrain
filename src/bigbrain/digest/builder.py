@@ -211,15 +211,14 @@ class DigestBuilder:
         target: str = "markdown",
         model: str = "",
         force: bool = False,
+        no_ai: bool = False,
         notion_parent_id: str = "",
         on_duplicate: str = "skip",
     ) -> DigestResult:
         """Generate digest for a document.
 
-        1. Check if KB content changed since last digest (skip if unchanged)
-        2. Generate markdown study notes (one per chunk) — cached in digest/<doc>/
-        3. If target != markdown, reformat each file to the requested format
-        4. If target is wiki/notion, copy/push to destination
+        Args:
+            no_ai: If True, extract raw chapter text without AI calls (instant).
         """
         doc = self._store.get_document(doc_id)
         if doc is None:
@@ -231,7 +230,6 @@ class DigestBuilder:
             logger.info("Digest up-to-date for %s — skipping", doc.title)
             result = DigestResult()
             result.output_dir = str(self._output_dir / _slugify(doc.title))
-            # Populate digest_files from existing files for downstream targets
             out_dir = Path(result.output_dir)
             if out_dir.is_dir():
                 result.digest_files = sorted(
@@ -241,7 +239,6 @@ class DigestBuilder:
 
             if target == "markdown":
                 return result
-            # For other targets, use cached digest files
             if target in ("flashcard", "cheatsheet", "qa"):
                 return self._reformat(doc, result, target=target, model=model, force=force)
             elif target == "wiki":
@@ -250,10 +247,12 @@ class DigestBuilder:
                 return self._to_notion(doc, result, parent_id=notion_parent_id)
             return result
 
-        # Step 1: Generate base markdown digest (the expensive AI call)
-        base_result = self._generate_base_digest(doc, model=model, force=force)
+        # Step 1: Generate base digest
+        if no_ai:
+            base_result = self._generate_raw_digest(doc, force=force)
+        else:
+            base_result = self._generate_base_digest(doc, model=model, force=force)
 
-        # Save content hash for incremental check
         self._save_digest_hash(doc)
 
         if target == "markdown":
@@ -261,6 +260,9 @@ class DigestBuilder:
 
         # Step 2: Reformat or route to target
         if target in ("flashcard", "cheatsheet", "qa"):
+            if no_ai:
+                base_result.errors.append(f"--no-ai incompatible with --to {target} (needs AI to reformat)")
+                return base_result
             return self._reformat(doc, base_result, target=target, model=model, force=force)
         elif target == "wiki":
             return self._to_wiki(doc, base_result)
@@ -298,6 +300,47 @@ class DigestBuilder:
         hash_path = self._output_dir / doc_slug / ".digest_hash"
         hash_path.parent.mkdir(parents=True, exist_ok=True)
         hash_path.write_text(self._compute_content_hash(doc), encoding="utf-8")
+
+    def _generate_raw_digest(
+        self, doc: Document, *, force: bool = False,
+    ) -> DigestResult:
+        """Extract raw chapter text — zero API calls, instant.
+
+        Groups sections into chapters (via PDF TOC), adds a heading,
+        and saves the raw text as markdown. Complete content, no AI.
+        """
+        result = DigestResult()
+        doc_slug = _slugify(doc.title)
+        out_dir = self._output_dir / doc_slug
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result.output_dir = str(out_dir)
+
+        chapters = self._group_into_chapters(doc)
+        if not chapters:
+            result.errors.append("No content available")
+            return result
+
+        for title, content in chapters:
+            if not content.strip():
+                result.skipped += 1
+                continue
+
+            slug = _slugify(title) or f"chapter-{result.written + result.skipped + 1:02d}"
+            out_path = out_dir / f"{slug}.md"
+
+            if out_path.exists() and not force:
+                result.skipped += 1
+                result.digest_files.append(str(out_path))
+                continue
+
+            markdown = f"# {title}\n\n{content.strip()}\n"
+            out_path.write_text(markdown, encoding="utf-8")
+            result.written += 1
+            result.digest_files.append(str(out_path))
+            logger.info("Wrote: %s (%d chars)", out_path.name, len(content))
+
+        logger.info("Raw digest: %d chapters, 0 API calls", result.written)
+        return result
 
     def _generate_base_digest(
         self, doc: Document, *, model: str = "", force: bool = False,

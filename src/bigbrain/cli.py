@@ -1431,6 +1431,7 @@ def _handle_digest(args: argparse.Namespace) -> int:
 
     model = args.model or ""
     force = args.force
+    no_ai = getattr(args, 'no_ai', False)
     target = getattr(args, 'to', 'markdown') or 'markdown'
     output = args.output or "digest"
     notion_parent = getattr(args, 'notion_parent', '') or ''
@@ -1460,9 +1461,10 @@ def _handle_digest(args: argparse.Namespace) -> int:
         return 1
 
     target_info = f" → {target}" if target != "markdown" else ""
+    mode_info = " (no AI)" if no_ai else ""
     scope = f"doc {doc_ids[0]}" if len(doc_ids) == 1 else f"all {len(doc_ids)} documents"
-    print(f"Generating digest for {scope}{target_info}...")
-    if model:
+    print(f"Generating digest for {scope}{target_info}{mode_info}...")
+    if model and not no_ai:
         print(f"  Model: {model}")
 
     total_written = 0
@@ -1474,6 +1476,7 @@ def _handle_digest(args: argparse.Namespace) -> int:
         for doc_id in doc_ids:
             result = builder.build(
                 doc_id, target=target, model=model, force=force,
+                no_ai=no_ai,
                 notion_parent_id=notion_parent,
                 on_duplicate=on_duplicate,
             )
@@ -1521,6 +1524,10 @@ def _add_digest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     p.add_argument(
         "--force", action="store_true", default=False,
         help="Regenerate even if output files exist",
+    )
+    p.add_argument(
+        "--no-ai", action="store_true", default=False,
+        help="Raw extraction only — 0 API calls, instant, complete content",
     )
     p.add_argument(
         "--output", "-o", type=str, default="digest",
