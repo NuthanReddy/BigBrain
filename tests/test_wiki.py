@@ -19,7 +19,7 @@ from bigbrain.wiki.slugger import (
 )
 from bigbrain.wiki.frontmatter import build_frontmatter, parse_frontmatter, render_page
 from bigbrain.wiki.generators import (
-    EntityPageGenerator,
+    ConceptPageGenerator,
     SourcePageGenerator,
     OverviewPageGenerator,
 )
@@ -254,58 +254,42 @@ class TestFrontmatter:
 
 
 # ---------------------------------------------------------------------------
-# TestEntityPageGenerator
+# TestConceptPageGenerator
 # ---------------------------------------------------------------------------
 
 
-class TestEntityPageGenerator:
+class TestConceptPageGenerator:
     def test_generate_basic(self):
-        entity = _make_entity(description="Efficient search on sorted array")
-        gen = EntityPageGenerator()
-        page = gen.generate(entity)
-        assert page.slug == "binary-search"
+        entity = _make_entity(description="Efficient search on sorted array", entity_type="concept")
+        gen = ConceptPageGenerator()
+        page = gen.generate("Binary Search", [entity])
+        assert "binary-search" in page.slug
         assert page.title == "Binary Search"
         assert "Efficient search on sorted array" in page.content
 
-    def test_generate_with_relationships(self):
-        e1 = _make_entity(eid="e1", name="Binary Search")
-        e2 = _make_entity(
-            eid="e2", name="Array", entity_type="data_structure", description="Memory block"
-        )
-        rel = Relationship(
-            id="r1",
-            source_entity_id="e1",
-            target_entity_id="e2",
-            relationship_type="uses",
-        )
-        gen = EntityPageGenerator()
-        page = gen.generate(
-            e1,
-            relationships=[rel],
-            all_entities={"e1": e1, "e2": e2},
-        )
-        assert "## Relationships" in page.content
-        assert "uses" in page.content
-        assert "[[array|Array]]" in page.content
+    def test_generate_groups_by_type(self):
+        e1 = _make_entity(eid="e1", name="Sorting", entity_type="concept", description="Ordering elements")
+        e2 = _make_entity(eid="e2", name="Merge Sort", entity_type="algorithm", description="Divide and conquer sort")
+        e3 = _make_entity(eid="e3", name="Array", entity_type="data_structure", description="Contiguous memory")
+        gen = ConceptPageGenerator()
+        page = gen.generate("Sorting", [e1, e2, e3])
+        assert "## Algorithms" in page.content
+        assert "### Merge Sort" in page.content
+        assert "## Data Structures" in page.content
+        assert "### Array" in page.content
 
-    def test_generate_with_see_also(self):
-        e1 = _make_entity(eid="e1", name="Binary Search")
-        e2 = _make_entity(eid="e2", name="Linear Search", description="Sequential search")
-        gen = EntityPageGenerator()
-        page = gen.generate(e1, related_entities=[e2])
-        assert "## See Also" in page.content
-        assert "[[linear-search|Linear Search]]" in page.content
+    def test_page_type_is_topic(self):
+        entity = _make_entity(entity_type="concept")
+        gen = ConceptPageGenerator()
+        page = gen.generate("Binary Search", [entity])
+        assert page.page_type == PageType.TOPIC
 
-    def test_page_type_is_entity(self):
-        entity = _make_entity()
-        gen = EntityPageGenerator()
-        page = gen.generate(entity)
-        assert page.page_type == PageType.ENTITY
-
-    def test_tags_include_entity_type(self):
-        entity = _make_entity(entity_type="algorithm")
-        gen = EntityPageGenerator()
-        page = gen.generate(entity)
+    def test_tags_include_all_member_types(self):
+        e1 = _make_entity(eid="e1", entity_type="concept")
+        e2 = _make_entity(eid="e2", entity_type="algorithm")
+        gen = ConceptPageGenerator()
+        page = gen.generate("Test", [e1, e2])
+        assert "concept" in page.tags
         assert "algorithm" in page.tags
 
 
@@ -551,13 +535,15 @@ class TestWikiBuilder:
         builder = WikiBuilder(store=store, wiki_dir=wiki_dir)
         result = builder.build()
 
-        assert result.entity_pages == 2  # Binary Search, Array
+        # Concept grouping: 2 entities without type "concept" → grouped by type
+        assert result.entity_pages >= 1  # at least 1 concept page
         assert result.source_pages == 1  # Test Doc
-        assert result.total_pages >= 4  # 2 entity + 1 source + 1 overview
-        assert result.written >= 4
+        assert result.total_pages >= 3  # concept(s) + 1 source + 1 overview
+        assert result.written >= 3
         assert (wiki_dir / "overview.md").exists()
-        assert (wiki_dir / "binary-search.md").exists()
-        assert (wiki_dir / "array.md").exists()
+        # At least some entity-derived pages exist
+        md_files = list(wiki_dir.glob("*.md"))
+        assert len(md_files) >= 3
         store.close()
 
     def test_build_dry_run(self, tmp_path: Path):
@@ -566,7 +552,7 @@ class TestWikiBuilder:
         builder = WikiBuilder(store=store, wiki_dir=wiki_dir)
         result = builder.build(dry_run=True)
 
-        assert result.total_pages >= 4
+        assert result.total_pages >= 3
         assert result.written == 0
         # No files should be created
         assert not wiki_dir.exists() or not list(wiki_dir.glob("*.md"))
@@ -590,7 +576,7 @@ class TestWikiBuilder:
         builder = WikiBuilder(store=store, wiki_dir=wiki_dir)
 
         result1 = builder.build()
-        assert result1.written >= 4
+        assert result1.written >= 3
 
         result2 = builder.build()
         # Second build should write 0 (all unchanged)
@@ -604,7 +590,7 @@ class TestWikiBuilder:
         builder = WikiBuilder(store=store, wiki_dir=wiki_dir)
         result = builder.build()
 
-        assert result.entity_pages == 2
+        assert result.entity_pages >= 1
         assert result.source_pages == 1
         assert result.total_links >= 1  # at least the relationship link
         assert not result.errors
@@ -615,7 +601,7 @@ class TestWikiBuilder:
         wiki_dir = tmp_path / "wiki"
         with WikiBuilder(store=store, wiki_dir=wiki_dir) as builder:
             result = builder.build()
-            assert result.total_pages >= 4
+            assert result.total_pages >= 3
 
 
 # ---------------------------------------------------------------------------

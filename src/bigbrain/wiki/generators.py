@@ -1,7 +1,14 @@
-"""Wiki page generators — create WikiPage objects from KB data."""
+"""Wiki page generators — create WikiPage objects from KB data.
+
+Generates **concept pages** (one per high-level concept or topic) that
+group related entities (algorithms, data structures, theorems, etc.)
+as sections within the page.  Source pages and the overview page remain
+as before.
+"""
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,113 +33,358 @@ _EXPAND_TEMPLATE = (
     "\nExplanation:"
 )
 
+# Entity types that get their own wiki page (concepts = top-level topics)
+CONCEPT_TYPES = {"concept", "topic"}
 
-class EntityPageGenerator:
-    """Generates a wiki page for a single entity."""
+# Entity types grouped as subsections within a concept page
+SUBSECTION_TYPES = {
+    "algorithm", "data_structure", "theorem", "definition",
+    "technique", "property", "formula", "person", "example", "other",
+}
+
+
+def group_entities_into_concepts(
+    entities: list[Entity],
+    relationships: list[Relationship],
+) -> dict[str, list[Entity]]:
+    """Group entities into concept clusters.
+
+    Strategy:
+    1. Entities with type 'concept' become cluster heads.
+    2. Other entities are assigned to the concept they're related to
+       (via relationships or metadata 'related' field).
+    3. Unrelated entities are grouped under their source document title.
+    """
+    concepts: dict[str, Entity] = {}
+    non_concepts: list[Entity] = []
+
+    for e in entities:
+        if e.entity_type in CONCEPT_TYPES:
+            concepts[e.id] = e
+        else:
+            non_concepts.append(e)
+
+    # Build name→concept_id lookup
+    concept_by_name: dict[str, str] = {}
+    for cid, c in concepts.items():
+        concept_by_name[c.name.lower().strip()] = cid
+
+    # Build relationship mapping: entity_id → set of related entity_ids
+    rel_map: dict[str, set[str]] = defaultdict(set)
+    for r in relationships:
+        rel_map[r.source_entity_id].add(r.target_entity_id)
+        rel_map[r.target_entity_id].add(r.source_entity_id)
+
+    # Assign non-concepts to their best concept
+    clusters: dict[str, list[Entity]] = {cid: [] for cid in concepts}
+    unclustered: list[Entity] = []
+
+    for e in non_concepts:
+        assigned = False
+
+        # 1. Check relationships to a concept
+        for related_id in rel_map.get(e.id, set()):
+            if related_id in concepts:
+                clusters[related_id].append(e)
+                assigned = True
+                break
+
+        # 2. Check metadata 'related' names
+        if not assigned and e.metadata:
+            for name in e.metadata.get("related", []):
+                key = name.lower().strip()
+                if key in concept_by_name:
+                    clusters[concept_by_name[key]].append(e)
+                    assigned = True
+                    break
+
+        if not assigned:
+            unclustered.append(e)
+
+    # 3. Group unclustered by document_id
+    unclustered_by_doc: dict[str, list[Entity]] = defaultdict(list)
+    for e in unclustered:
+        unclustered_by_doc[e.document_id].append(e)
+
+    # Build final result: concept_name → entity list (including the concept itself)
+    result: dict[str, list[Entity]] = {}
+    for cid, concept_entity in concepts.items():
+        members = [concept_entity] + clusters.get(cid, [])
+        result[concept_entity.name] = members
+
+    # Unclustered entities: group by type to form synthetic concept pages
+    if unclustered:
+        by_type: dict[str, list[Entity]] = defaultdict(list)
+        for e in unclustered:
+            by_type[e.entity_type].append(e)
+        for etype, ents in by_type.items():
+            page_name = f"{etype.replace('_', ' ').title()}s"
+            result[page_name] = ents
+
+    return result
+
+
+_PAGE_SYSTEM = (
+    "You are an expert technical writer creating a comprehensive wiki page. "
+    "Write detailed, well-structured Markdown content. "
+    "Use ## for major sections and ### for subsections. "
+    "Explain concepts thoroughly — each entity should get at least a full paragraph. "
+    "Include examples, trade-offs, time/space complexity for algorithms, "
+    "formal definitions for theorems, and key operations for data structures. "
+    "Cross-reference related concepts using [[wikilink]] syntax."
+)
+
+_PAGE_TEMPLATE = '''Write a comprehensive wiki page about "{concept_name}".
+
+The page should cover these entities in depth (don't just list them — explain each one with 1-3 paragraphs):
+
+{entity_list}
+
+Requirements:
+- Start with a ## Overview section explaining the concept broadly
+- Group related entities under ## sections by type (Algorithms, Data Structures, Theorems, etc.)
+- Each entity gets a ### subsection with detailed explanation (not one-liners)
+- For algorithms: explain how they work, time/space complexity, when to use them
+- For data structures: explain key operations, properties, use cases
+- For theorems/definitions: state the theorem formally, explain its significance
+- For techniques: explain the approach, when to apply it, trade-offs
+- End with a ## Related Topics section linking to related concepts using [[concept name]]
+- Write in Markdown format
+- Be thorough — aim for a reference-quality wiki page
+
+Wiki page:'''
+
+_PAGE_TEMPLATE_WITH_SOURCE = '''Write a comprehensive wiki page about "{concept_name}".
+
+Here are the key entities to cover:
+{entity_list}
+
+Here is the actual source text from the original documents about this topic:
+
+{source_text}
+
+Requirements:
+- Start with a ## Overview section explaining the concept broadly using the source material
+- Group entities under ## sections by type (Algorithms, Data Structures, Theorems, etc.)
+- Each entity gets a ### subsection — use the SOURCE TEXT to write detailed, accurate explanations (not just summaries)
+- For algorithms: explain how they work step by step, include pseudocode if in the source, time/space complexity
+- For data structures: explain key operations, properties, use cases from the source
+- For theorems/definitions: state them formally as given in the source, explain significance
+- Include concrete examples from the source text where available
+- End with a ## Related Topics section using [[concept name]] wikilinks
+- Write in Markdown format
+- Preserve the technical depth and accuracy of the original source material
+
+Wiki page:'''
+
+
+class ConceptPageGenerator:
+    """Generates a comprehensive wiki page for a concept with all related entities."""
 
     def __init__(self, registry: Any | None = None) -> None:
         self._registry = registry
 
-    def _ai_expand(self, entity: Entity, *, model: str = "") -> str:
-        """Use AI to expand an entity description into a detailed overview."""
+    def _build_entity_list(self, members: list[Entity]) -> str:
+        """Build a structured entity list for the AI prompt."""
+        by_type: dict[str, list[Entity]] = defaultdict(list)
+        for e in members:
+            by_type[e.entity_type].append(e)
+
+        lines: list[str] = []
+        for etype in sorted(by_type.keys()):
+            ents = sorted(by_type[etype], key=lambda x: x.name)
+            type_title = etype.replace("_", " ").title()
+            lines.append(f"\n{type_title}:")
+            for e in ents:
+                desc = e.description or "No description"
+                details = ""
+                if e.metadata:
+                    d = e.metadata.get("details", "")
+                    if d:
+                        details = f" | Details: {d}"
+                    related = e.metadata.get("related", [])
+                    if related:
+                        details += f" | Related: {', '.join(related[:5])}"
+                lines.append(f"  - {e.name}: {desc}{details}")
+        return "\n".join(lines)
+
+    def _generate_with_ai(
+        self, concept_name: str, members: list[Entity],
+        source_chunks: list[Any] | None = None, *, model: str = "",
+    ) -> str:
+        """Use AI to write a full concept wiki page from entities + source text."""
         if self._registry is None:
             return ""
-        details = entity.metadata.get("details", "") if entity.metadata else ""
-        details_section = f"Additional details: {details}\n" if details else ""
-        prompt = _EXPAND_TEMPLATE.format(
-            entity_type=entity.entity_type or "concept",
-            name=entity.name,
-            description=entity.description or "N/A",
-            details_section=details_section,
-        )
+
+        entity_list = self._build_entity_list(members)
+
+        # Include actual source text from chunks (the real knowledge)
+        source_text = ""
+        if source_chunks:
+            chunk_texts = []
+            for c in source_chunks[:10]:  # cap to avoid token overflow
+                title = getattr(c, "section_title", "") or ""
+                text = getattr(c, "content", "") or ""
+                if text.strip():
+                    header = f"[{title}] " if title else ""
+                    chunk_texts.append(f"{header}{text[:3000]}")
+            if chunk_texts:
+                source_text = "\n\n---\n\n".join(chunk_texts)
+
+        if source_text:
+            prompt = _PAGE_TEMPLATE_WITH_SOURCE.format(
+                concept_name=concept_name,
+                entity_list=entity_list,
+                source_text=source_text[:15000],  # cap total prompt size
+            )
+        else:
+            prompt = _PAGE_TEMPLATE.format(
+                concept_name=concept_name,
+                entity_list=entity_list,
+            )
+
         messages = [
-            {"role": "system", "content": _EXPAND_SYSTEM},
+            {"role": "system", "content": _PAGE_SYSTEM},
             {"role": "user", "content": prompt},
         ]
         try:
-            resp = self._registry.chat(messages, model=model)
+            resp = self._registry.chat(messages, model=model, max_tokens=4000)
             return resp.text.strip()
         except Exception as exc:
-            logger.warning("AI expand failed for entity '%s': %s", entity.name, exc)
+            logger.warning("AI page generation failed for '%s': %s", concept_name, exc)
             return ""
+
+    def _generate_static(
+        self, concept_name: str, members: list[Entity],
+        relationships: list[Relationship] | None = None,
+        all_entities: dict[str, Entity] | None = None,
+        source_chunks: list[Any] | None = None,
+    ) -> str:
+        """Generate page content without AI, using entity data + source chunks."""
+        sections: list[str] = []
+
+        # Build chunk lookup: chunk_id → content
+        chunk_by_id: dict[str, str] = {}
+        if source_chunks:
+            for c in source_chunks:
+                cid = getattr(c, "id", "")
+                content = getattr(c, "content", "")
+                if cid and content:
+                    chunk_by_id[cid] = content
+
+        # Find concept entity for overview
+        concept_entity = None
+        sub_entities: list[Entity] = []
+        for e in members:
+            if e.entity_type in CONCEPT_TYPES and e.name == concept_name:
+                concept_entity = e
+            else:
+                sub_entities.append(e)
+
+        if concept_entity:
+            overview_parts: list[str] = []
+            if concept_entity.description:
+                overview_parts.append(concept_entity.description)
+            details = concept_entity.metadata.get("details", "") if concept_entity.metadata else ""
+            if details:
+                overview_parts.append(details)
+            # Include source text from the chunk this concept was extracted from
+            if concept_entity.source_chunk_id and concept_entity.source_chunk_id in chunk_by_id:
+                overview_parts.append(chunk_by_id[concept_entity.source_chunk_id][:2000])
+            if overview_parts:
+                sections.append("## Overview\n\n" + "\n\n".join(overview_parts))
+
+        # Group by type with full content from chunks
+        by_type: dict[str, list[Entity]] = defaultdict(list)
+        for e in sub_entities:
+            by_type[e.entity_type].append(e)
+
+        for etype in sorted(by_type.keys()):
+            ents = sorted(by_type[etype], key=lambda x: x.name)
+            type_title = etype.replace("_", " ").title() + "s"
+            type_parts: list[str] = []
+
+            for e in ents:
+                parts: list[str] = [f"### {e.name}\n"]
+                if e.description:
+                    parts.append(e.description)
+                details = e.metadata.get("details", "") if e.metadata else ""
+                if details:
+                    parts.append(f"\n{details}")
+
+                # Include actual source text from the chunk
+                if e.source_chunk_id and e.source_chunk_id in chunk_by_id:
+                    chunk_text = chunk_by_id[e.source_chunk_id][:2000]
+                    parts.append(f"\n{chunk_text}")
+
+                meta_related = e.metadata.get("related", []) if e.metadata else []
+                if meta_related:
+                    links = ", ".join(title_to_wikilink(n) for n in meta_related[:5])
+                    parts.append(f"\n**Related:** {links}")
+                type_parts.append("\n".join(parts))
+
+            sections.append(f"## {type_title}\n\n" + "\n\n".join(type_parts))
+
+        # Cross-concept relationships
+        if relationships and all_entities:
+            member_ids = {e.id for e in members}
+            rel_lines: list[str] = []
+            for r in relationships:
+                if r.source_entity_id in member_ids:
+                    target = all_entities.get(r.target_entity_id)
+                    if target and target.id not in member_ids:
+                        rel_lines.append(f"- {title_to_wikilink(target.name)}")
+                elif r.target_entity_id in member_ids:
+                    source = all_entities.get(r.source_entity_id)
+                    if source and source.id not in member_ids:
+                        rel_lines.append(f"- {title_to_wikilink(source.name)}")
+            if rel_lines:
+                rel_lines = sorted(set(rel_lines))[:20]
+                sections.append("## Related Topics\n\n" + "\n".join(rel_lines))
+
+        return "\n\n".join(sections)
 
     def generate(
         self,
-        entity: Entity,
-        related_entities: list[Entity] | None = None,
+        concept_name: str,
+        members: list[Entity],
         relationships: list[Relationship] | None = None,
         all_entities: dict[str, Entity] | None = None,
+        source_chunks: list[Any] | None = None,
         *,
         enrich: bool = False,
         model: str = "",
     ) -> WikiPage:
-        slug = make_entity_slug(entity.name, entity.entity_type)
+        slug = make_entity_slug(concept_name, "concept")
 
-        sections = []
-
-        # Overview / Description
-        expanded = ""
+        # If enrich is on, ask AI to write the entire page using chunk content
         if enrich and self._registry is not None:
-            expanded = self._ai_expand(entity, model=model)
+            content = self._generate_with_ai(
+                concept_name, members, source_chunks=source_chunks, model=model,
+            )
+            if not content:
+                content = self._generate_static(
+                    concept_name, members, relationships, all_entities,
+                    source_chunks=source_chunks,
+                )
+        else:
+            content = self._generate_static(
+                concept_name, members, relationships, all_entities,
+                source_chunks=source_chunks,
+            )
 
-        if expanded:
-            sections.append(f"## Overview\n\n{expanded}")
-        elif entity.description:
-            sections.append(f"## Description\n\n{entity.description}")
-
-        # Details from metadata
-        details = entity.metadata.get("details", "") if entity.metadata else ""
-        if details:
-            sections.append(f"## Details\n\n{details}")
-
-        # Type badge
-        if entity.entity_type:
-            sections.append(f"**Type:** {entity.entity_type}")
-
-        # Relationships
-        if relationships:
-            all_ents = all_entities or {}
-            rel_lines = []
-            for r in sorted(relationships, key=lambda x: x.relationship_type):
-                if r.source_entity_id == entity.id:
-                    target = all_ents.get(r.target_entity_id)
-                    if target:
-                        link = title_to_wikilink(target.name)
-                        rel_lines.append(f"- {r.relationship_type.replace('_', ' ')} → {link}")
-                elif r.target_entity_id == entity.id:
-                    source = all_ents.get(r.source_entity_id)
-                    if source:
-                        link = title_to_wikilink(source.name)
-                        rel_lines.append(f"- {link} → {r.relationship_type.replace('_', ' ')}")
-            if rel_lines:
-                sections.append("## Relationships\n\n" + "\n".join(rel_lines))
-
-        # Related entities from metadata
-        meta_related = entity.metadata.get("related", []) if entity.metadata else []
-        if meta_related:
-            related_links = [f"- {title_to_wikilink(name)}" for name in meta_related[:5]]
-            sections.append("## Related Topics\n\n" + "\n".join(related_links))
-
-        # Related entities (same type or same document)
-        if related_entities:
-            see_also = []
-            for re_ent in sorted(related_entities, key=lambda x: x.name)[:15]:
-                if re_ent.id != entity.id:
-                    see_also.append(f"- {title_to_wikilink(re_ent.name)}")
-            if see_also:
-                sections.append("## See Also\n\n" + "\n".join(see_also))
-
-        content = "\n\n".join(sections)
+        all_types = sorted(set(e.entity_type for e in members if e.entity_type))
+        all_doc_ids = sorted(set(e.document_id for e in members if e.document_id))
 
         return WikiPage(
             slug=slug,
-            title=entity.name,
-            page_type=PageType.ENTITY,
+            title=concept_name,
+            page_type=PageType.TOPIC,
             content=content,
-            entity_type=entity.entity_type,
-            tags=[entity.entity_type] if entity.entity_type else [],
-            source_doc_ids=[entity.document_id] if entity.document_id else [],
-            source_count=1,
+            entity_type="concept",
+            tags=all_types,
+            source_doc_ids=all_doc_ids,
+            source_count=len(all_doc_ids),
         )
 
 
