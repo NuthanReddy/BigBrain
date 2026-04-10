@@ -117,21 +117,22 @@ Questions:'''
 def _extract_chapter_images(
     pdf_path: str, start_page: int, end_page: int,
     chapter_slug: str, total_pages: int, output_dir: str = "digest",
-) -> list[str]:
-    """Extract raster images + render vector figure pages as PNG.
+) -> list[tuple[int, str, str]]:
+    """Extract raster images + detect vector figures as SVG.
 
-    Images saved inside the chapter folder: digest/<doc>/<chapter>/images/
-    Returns list of markdown image references (relative paths).
+    Images saved inside chapter folder: <output_dir>/<chapter>/images/
+    Returns list of (page_number, caption, markdown_ref) for inline placement.
     """
     import fitz
     doc = fitz.open(pdf_path)
     img_dir = Path(output_dir) / chapter_slug / "images"
-    img_refs: list[str] = []
+    figures: list[tuple[int, str, str]] = []  # (page_num, caption, md_ref)
     img_count = 0
 
     for pg_idx in range(start_page - 1, min(end_page - 1, total_pages)):
         try:
             page = doc[pg_idx]
+            pg_num = pg_idx + 1
 
             # Raster images
             for img_tuple in page.get_images(full=True):
@@ -145,22 +146,48 @@ def _extract_chapter_images(
                     img_dir.mkdir(parents=True, exist_ok=True)
                     img_count += 1
                     ext = img_data.get("ext", "png")
-                    img_name = f"p{pg_idx + 1}_img{img_count}.{ext}"
+                    img_name = f"p{pg_num}_img{img_count}.{ext}"
                     (img_dir / img_name).write_bytes(img_data["image"])
-                    img_refs.append(f"![Figure (page {pg_idx + 1})](images/{img_name})")
+                    figures.append((pg_num, f"Image (page {pg_num})", f"![Image (page {pg_num})](images/{img_name})"))
                 except Exception:
                     continue
+
+            # Detect vector figure regions → save page as SVG
+            try:
+                tblocks = page.get_text("blocks")
+                text_blocks = sorted(
+                    [(tb[1], tb[3], tb[4] if tb[-1] == 0 else "") for tb in tblocks],
+                    key=lambda x: x[0],
+                )
+                for j in range(len(text_blocks) - 1):
+                    _, prev_bottom, _ = text_blocks[j]
+                    next_top, _, next_text = text_blocks[j + 1]
+                    gap = next_top - prev_bottom
+                    if gap > 40 and next_text.strip().startswith("Figure"):
+                        try:
+                            img_dir.mkdir(parents=True, exist_ok=True)
+                            img_count += 1
+                            svg = page.get_svg_image()
+                            img_name = f"p{pg_num}_fig{img_count}.svg"
+                            (img_dir / img_name).write_text(svg, encoding="utf-8")
+                            caption = next_text.strip().split("\n")[0][:80]
+                            figures.append((pg_num, caption, f"![{caption}](images/{img_name})"))
+                        except Exception:
+                            continue
+            except Exception:
+                pass
         except Exception:
             continue
 
     doc.close()
-    return img_refs
+    return figures
 
 
 def _process_one_chapter(args: tuple) -> tuple[str, str]:
-    """Process a single chapter: extract markdown + images. Thread-safe."""
+    """Process a single chapter: structured markdown + inline figures. Thread-safe."""
     pdf_path, title, start_page, end_page, total_pages, idx, output_dir = args
 
+    # Extract structured markdown with font detection
     content = _extract_structured_markdown(
         pdf_path, start_page, end_page, chapter_title=title,
     )
@@ -168,14 +195,44 @@ def _process_one_chapter(args: tuple) -> tuple[str, str]:
     if not content.strip():
         return (title, "")
 
+    # Extract figures (raster + vector SVG)
     chapter_slug = _slugify(title) or f"chapter-{idx + 1}"
-    img_refs = _extract_chapter_images(
+    figures = _extract_chapter_images(
         pdf_path, start_page, end_page, chapter_slug, total_pages,
         output_dir=output_dir,
     )
 
-    if img_refs:
-        content += "\n\n## Figures\n\n" + "\n\n".join(img_refs)
+    # Embed figures inline near their caption references in the markdown
+    if figures:
+        lines = content.split("\n")
+        insertions: dict[int, list[str]] = {}  # line_index → figure refs to insert after
+
+        for pg_num, caption, md_ref in figures:
+            # Find the line mentioning this figure's caption
+            caption_key = caption.split(":")[0].strip() if ":" in caption else caption[:20]
+            best_line = -1
+            for i, line in enumerate(lines):
+                if caption_key.lower() in line.lower():
+                    best_line = i
+                    break
+
+            if best_line >= 0:
+                insertions.setdefault(best_line, []).append(md_ref)
+            else:
+                # No caption match — append at the end of the page's content area
+                insertions.setdefault(len(lines) - 1, []).append(md_ref)
+
+        # Rebuild content with inline figures
+        new_lines: list[str] = []
+        for i, line in enumerate(lines):
+            new_lines.append(line)
+            if i in insertions:
+                new_lines.append("")
+                for ref in insertions[i]:
+                    new_lines.append(ref)
+                    new_lines.append("")
+
+        content = "\n".join(new_lines)
 
     return (title, content)
 
