@@ -60,9 +60,25 @@ class NotionExporter:
                 )
                 return None
             try:
-                page = self._client.create_page(parent_page_id, doc.title, children=blocks)
+                # Notion API limits children to 100 blocks per request
+                first_batch = blocks[:100]
+                remaining = blocks[100:]
+                page = self._client.create_page(parent_page_id, doc.title, children=first_batch)
                 notion_page_id = page["id"]
-                logger.info("Created Notion page %s for doc %s", notion_page_id, doc.title)
+
+                # Append remaining blocks in batches of 100
+                while remaining:
+                    batch = remaining[:100]
+                    remaining = remaining[100:]
+                    try:
+                        self._client._client.blocks.children.append(
+                            block_id=notion_page_id, children=batch,
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to append block batch: %s", exc)
+                        break
+
+                logger.info("Created Notion page %s for doc %s (%d blocks)", notion_page_id, doc.title, len(blocks))
             except Exception as exc:
                 logger.error("Failed to create Notion page for %s: %s", doc.title, exc)
                 return None

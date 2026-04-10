@@ -46,15 +46,15 @@ def _resolve_notion_page_id(value: str, cfg: object) -> str | None:
             title = client.get_page_title(page) or ""
             if title.lower().strip() == value.lower().strip():
                 page_id = page["id"]
-                print(f"  Resolved '{value}' → {page_id}")
+                print(f"  Resolved '{value}' → {title} ({page_id})")
                 return page_id
-        # Partial match fallback
+        # No exact match
         if pages:
-            page_id = pages[0]["id"]
-            title = client.get_page_title(pages[0]) or page_id
-            print(f"  Resolved '{value}' → {title} ({page_id})")
-            return page_id
-        print(f"Error: No Notion page found matching '{value}'")
+            titles = [client.get_page_title(p) or "?" for p in pages[:5]]
+            print(f"Error: No exact match for '{value}'. Found: {', '.join(titles)}")
+            print(f"  Use the exact page title or the UUID directly.")
+        else:
+            print(f"Error: No Notion page found matching '{value}'")
         return None
     except Exception as exc:
         print(f"Error resolving Notion page '{value}': {exc}")
