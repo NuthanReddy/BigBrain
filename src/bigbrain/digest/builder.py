@@ -153,20 +153,49 @@ class DigestBuilder:
         model: str = "",
         force: bool = False,
         notion_parent_id: str = "",
+        on_duplicate: str = "skip",
     ) -> DigestResult:
         """Generate digest for a document.
 
-        1. Generate markdown study notes (one per chunk) — cached in digest/<doc>/
-        2. If target != markdown, reformat each file to the requested format
-        3. If target is wiki/notion, copy/push to destination
+        1. Check if KB content changed since last digest (skip if unchanged)
+        2. Generate markdown study notes (one per chunk) — cached in digest/<doc>/
+        3. If target != markdown, reformat each file to the requested format
+        4. If target is wiki/notion, copy/push to destination
         """
         doc = self._store.get_document(doc_id)
         if doc is None:
             logger.warning("Document not found: %s", doc_id)
             return DigestResult(errors=[f"Document not found: {doc_id}"])
 
+        # Check if KB content has changed since last digest
+        if not force and self._is_digest_current(doc):
+            logger.info("Digest up-to-date for %s — skipping", doc.title)
+            result = DigestResult()
+            result.output_dir = str(self._output_dir / _slugify(doc.title))
+            # Populate digest_files from existing files for downstream targets
+            out_dir = Path(result.output_dir)
+            if out_dir.is_dir():
+                result.digest_files = sorted(
+                    str(p) for p in out_dir.glob("*.md") if not p.stem.startswith(".")
+                )
+                result.skipped = len(result.digest_files)
+
+            if target == "markdown":
+                return result
+            # For other targets, use cached digest files
+            if target in ("flashcard", "cheatsheet", "qa"):
+                return self._reformat(doc, result, target=target, model=model, force=force)
+            elif target == "wiki":
+                return self._to_wiki(doc, result)
+            elif target == "notion":
+                return self._to_notion(doc, result, parent_id=notion_parent_id)
+            return result
+
         # Step 1: Generate base markdown digest (the expensive AI call)
         base_result = self._generate_base_digest(doc, model=model, force=force)
+
+        # Save content hash for incremental check
+        self._save_digest_hash(doc)
 
         if target == "markdown":
             return base_result
@@ -181,6 +210,35 @@ class DigestBuilder:
 
         base_result.errors.append(f"Unknown target: {target}")
         return base_result
+
+    def _compute_content_hash(self, doc: Document) -> str:
+        """Compute a hash of all chunk content for change detection."""
+        import hashlib
+        chunks = self._store.get_chunks(doc.id)
+        if chunks:
+            combined = "|".join(c.content_hash or c.content[:100] for c in chunks)
+        elif doc.sections:
+            combined = "|".join(s.content[:100] for s in doc.sections if s.content)
+        else:
+            combined = doc.content[:1000]
+        return hashlib.sha256(combined.encode()).hexdigest()[:16]
+
+    def _is_digest_current(self, doc: Document) -> bool:
+        """Check if digest output is up-to-date with KB content."""
+        doc_slug = _slugify(doc.title)
+        hash_path = self._output_dir / doc_slug / ".digest_hash"
+        if not hash_path.exists():
+            return False
+        stored = hash_path.read_text(encoding="utf-8").strip()
+        current = self._compute_content_hash(doc)
+        return stored == current
+
+    def _save_digest_hash(self, doc: Document) -> None:
+        """Save content hash after successful digest generation."""
+        doc_slug = _slugify(doc.title)
+        hash_path = self._output_dir / doc_slug / ".digest_hash"
+        hash_path.parent.mkdir(parents=True, exist_ok=True)
+        hash_path.write_text(self._compute_content_hash(doc), encoding="utf-8")
 
     def _generate_base_digest(
         self, doc: Document, *, model: str = "", force: bool = False,

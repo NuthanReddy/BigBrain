@@ -1427,24 +1427,14 @@ def _handle_digest(args: argparse.Namespace) -> int:
         return 1
 
     from bigbrain.digest.builder import DigestBuilder
-
-    doc_id = args.doc_id
-    if not doc_id:
-        print("Error: --doc-id is required. Use 'bigbrain status' to find document IDs.")
-        return 1
-
-    # Resolve prefix
     from bigbrain.kb.store import KBStore
-    with KBStore(db_path) as store:
-        full_id = _resolve_doc_id(store, doc_id)
-        if full_id:
-            doc_id = full_id
 
     model = args.model or ""
     force = args.force
     target = getattr(args, 'to', 'markdown') or 'markdown'
     output = args.output or "digest"
     notion_parent = getattr(args, 'notion_parent', '') or ''
+    on_duplicate = getattr(args, 'on_duplicate', 'skip') or 'skip'
 
     # Resolve Notion parent if needed
     if target == "notion":
@@ -1455,28 +1445,52 @@ def _handle_digest(args: argparse.Namespace) -> int:
         if not notion_parent:
             return 1
 
+    # Resolve doc IDs — all docs if not specified
+    doc_ids: list[str] = []
+    with KBStore(db_path) as store:
+        if args.doc_id:
+            full_id = _resolve_doc_id(store, args.doc_id)
+            doc_ids = [full_id or args.doc_id]
+        else:
+            docs = store.list_documents(limit=9999)
+            doc_ids = [d.id for d in docs]
+
+    if not doc_ids:
+        print("No documents found in KB.")
+        return 1
+
     target_info = f" → {target}" if target != "markdown" else ""
-    print(f"Generating digest for {doc_id}{target_info}...")
+    scope = f"doc {doc_ids[0]}" if len(doc_ids) == 1 else f"all {len(doc_ids)} documents"
+    print(f"Generating digest for {scope}{target_info}...")
     if model:
         print(f"  Model: {model}")
 
+    total_written = 0
+    total_skipped = 0
+    total_errors: list[str] = []
+
     with DigestBuilder.from_config(cfg) as builder:
         builder._output_dir = Path(output)
-        result = builder.build(
-            doc_id, target=target, model=model, force=force,
-            notion_parent_id=notion_parent,
-        )
+        for doc_id in doc_ids:
+            result = builder.build(
+                doc_id, target=target, model=model, force=force,
+                notion_parent_id=notion_parent,
+                on_duplicate=on_duplicate,
+            )
+            total_written += result.written
+            total_skipped += result.skipped
+            total_errors.extend(result.errors)
+            if result.output_dir and len(doc_ids) == 1:
+                print(f"  Output: {result.output_dir}")
 
     print()
     print(f"Digest complete:")
-    print(f"  Written:  {result.written}")
-    print(f"  Skipped:  {result.skipped}")
-    if result.errors:
-        print(f"  Errors:   {len(result.errors)}")
-        for err in result.errors[:5]:
+    print(f"  Written:  {total_written}")
+    print(f"  Skipped:  {total_skipped}")
+    if total_errors:
+        print(f"  Errors:   {len(total_errors)}")
+        for err in total_errors[:5]:
             print(f"    - {err}")
-    if result.output_dir:
-        print(f"  Output:   {result.output_dir}")
     return 0
 
 
@@ -1487,12 +1501,13 @@ def _add_digest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         help="Generate rich study notes per chapter/section",
         description=(
             "Generate comprehensive study notes from KB data. "
-            "One AI call generates markdown, then --to routes to different outputs."
+            "One AI call generates markdown, then --to routes to different outputs. "
+            "Processes all documents if --doc-id is not specified."
         ),
     )
     p.add_argument(
-        "--doc-id", type=str, required=True,
-        help="Document ID to generate digest for (use prefix)",
+        "--doc-id", type=str, default="",
+        help="Document ID (prefix OK). Omit to process all documents.",
     )
     p.add_argument(
         "--to", type=str, default="markdown",
@@ -1514,6 +1529,12 @@ def _add_digest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     p.add_argument(
         "--notion-parent", type=str, default="",
         help="Notion parent page name or UUID (required for --to notion)",
+    )
+    p.add_argument(
+        "--on-duplicate",
+        choices=["skip", "overwrite", "merge"],
+        default="skip",
+        help="Duplicate handling: skip (default), overwrite, merge (append new content)",
     )
     p.set_defaults(func=_handle_digest)
     return p
