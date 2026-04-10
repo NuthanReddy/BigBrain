@@ -2323,6 +2323,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suppress log output",
     )
     parser.add_argument(
+        "--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Log level (default: INFO)",
+    )
+    parser.add_argument(
         "--log-file", type=str, default="",
         help="Write logs to a file",
     )
@@ -2378,6 +2383,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         from bigbrain.logging_config import setup_logging
         setup_logging(
+            level=getattr(args, "log_level", "INFO"),
             quiet=getattr(args, "quiet", False),
             log_file=getattr(args, "log_file", ""),
             log_format=getattr(args, "log_format", "console"),
