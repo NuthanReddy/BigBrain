@@ -2098,6 +2098,95 @@ def _add_plugins_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
     return p
 
 
+# ---------------------------------------------------------------------------
+# wiki subcommand
+# ---------------------------------------------------------------------------
+
+def _handle_wiki(args: argparse.Namespace) -> int:
+    """Build and manage the knowledge wiki."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    action = args.action
+
+    if action == "build":
+        db_path = cfg.kb_db_path
+        if not Path(db_path).exists():
+            print("Knowledge base is empty. Run 'bigbrain ingest' first.")
+            return 1
+
+        from bigbrain.wiki.builder import WikiBuilder
+
+        doc_id = getattr(args, 'doc_id', '') or ''
+        clean = getattr(args, 'clean', False)
+        dry_run = getattr(args, 'dry_run', False)
+
+        mode = "dry run" if dry_run else ("clean" if clean else "incremental")
+        print(f"Building wiki ({mode})...")
+
+        with WikiBuilder.from_config(cfg) as builder:
+            result = builder.build(doc_id=doc_id, clean=clean, dry_run=dry_run)
+
+        print()
+        print(f"Wiki build complete:")
+        print(f"  Total pages:   {result.total_pages}")
+        print(f"  Entity pages:  {result.entity_pages}")
+        print(f"  Source pages:  {result.source_pages}")
+        print(f"  Written:       {result.written}")
+        print(f"  Unchanged:     {result.skipped_unchanged}")
+        print(f"  Cross-links:   {result.total_links}")
+        if result.orphan_pages:
+            print(f"  Orphan pages:  {result.orphan_pages}")
+        if result.errors:
+            print(f"  Errors:        {len(result.errors)}")
+
+        print(f"\n  Wiki directory: wiki/")
+        return 0
+
+    elif action == "status":
+        wiki_dir = Path("wiki")
+        if not wiki_dir.is_dir():
+            print("No wiki directory found. Run 'bigbrain wiki build' first.")
+            return 0
+
+        pages = sorted(wiki_dir.glob("*.md"))
+        print(f"Wiki Status")
+        print(f"{'=' * 40}")
+        print(f"  Pages: {len(pages)}")
+        print(f"  Directory: {wiki_dir.resolve()}")
+        if pages:
+            print()
+            for p in pages[:30]:
+                print(f"  {p.stem}.md")
+            if len(pages) > 30:
+                print(f"  ... and {len(pages) - 30} more")
+        return 0
+
+    else:
+        print(f"Unknown wiki action: {action}")
+        return 1
+
+
+def _add_wiki_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``wiki`` subcommand."""
+    p = subparsers.add_parser(
+        "wiki",
+        help="Build and manage the knowledge wiki",
+        description="Generate an interlinked markdown wiki from the knowledge base.",
+    )
+    p.add_argument(
+        "action",
+        choices=["build", "status"],
+        help="Wiki action: build (generate pages), status (show wiki info)",
+    )
+    p.add_argument("--doc-id", type=str, default="", help="Build only for a specific document")
+    p.add_argument("--clean", action="store_true", default=False, help="Remove orphan wiki files not in current build")
+    p.add_argument("--dry-run", action="store_true", default=False, help="Show what would be built without writing files")
+    p.set_defaults(func=_handle_wiki)
+    return p
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build and return the top-level argument parser.
 
@@ -2144,6 +2233,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_auth_parser(subparsers)
     _add_notion_parser(subparsers)
     _add_plugins_parser(subparsers)
+    _add_wiki_parser(subparsers)
 
     return parser
 

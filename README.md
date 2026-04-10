@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase 11 – Polyglot Entity Store.** Pluggable backends: SQLite (default), PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone.
+**Phase 12A – LLM Wiki MVP.** Auto-generated interlinked markdown wiki from knowledge base with cross-references and YAML frontmatter.
 
 ## Quick Start
 
@@ -39,6 +39,7 @@ python main.py --help
 | `bigbrain notion`    | Notion sync/import/export/status                         | 6 ✅   |
 | `bigbrain update`    | Incremental update pipeline (ingest→distill→compile)     | 7 ✅   |
 | `bigbrain plugins`   | List discovered plugins                                  | 9 ✅   |
+| `bigbrain wiki`    | Build and manage the knowledge wiki                   | 12 ✅  |
 
 ## Ingestion (Phase 1)
 
@@ -284,6 +285,41 @@ distillation:
   relationship_extraction: true
   max_chunks_per_doc: 50
 ```
+
+## Knowledge Wiki (Phase 12)
+
+BigBrain generates a persistent, interlinked wiki of markdown files from your knowledge base — the core pattern from the LLM Wiki idea.
+
+### Usage
+
+```bash
+# Build the complete wiki
+bigbrain wiki build
+
+# Build for a specific document only  
+bigbrain wiki build --doc-id <id>
+
+# Preview without writing files
+bigbrain wiki build --dry-run
+
+# Clean up orphan pages
+bigbrain wiki build --clean
+
+# Check wiki status
+bigbrain wiki status
+```
+
+The wiki is written to `wiki/` as plain markdown files — git-friendly, browsable in Obsidian, and version-controllable.
+
+### Page Types
+
+| Type | Example | Content |
+|------|---------|---------|
+| Entity | `binary-search.md` | Description, relationships, see-also links |
+| Source | `source-introduction-to-algorithms.md` | Summary, key concepts with wikilinks |
+| Overview | `overview.md` | All sources + entity type counts |
+
+Each page has YAML frontmatter (`managed_by`, `tags`, `entity_type`, `aliases`, `source_count`) and [[wikilinks]] to related pages.
 
 ## Compilation (Phase 5)
 
@@ -589,6 +625,14 @@ BigBrain/
 │   │   ├── qdrant_backend.py  # Qdrant vector backend
 │   │   ├── weaviate_backend.py # Weaviate vector + BM25 backend
 │   │   └── pinecone_backend.py # Pinecone managed vector backend
+│   ├── wiki/              # LLM Wiki generation (Phase 12 ✅)
+│   │   ├── models.py      # WikiPage, PageType data models
+│   │   ├── slugger.py     # Deterministic slug generation
+│   │   ├── frontmatter.py # YAML frontmatter build/parse
+│   │   ├── generators.py  # Entity, source, overview page generators
+│   │   ├── linker.py      # Wikilink cross-reference engine + LinkGraph
+│   │   ├── writer.py      # Deterministic file writer (skip-if-unchanged)
+│   │   └── builder.py     # WikiBuilder orchestrator
 │   ├── progress.py        # Progress bars with rich fallback (Phase 10 ✅)
 │   ├── retry.py           # Retry decorator + circuit breaker (Phase 10 ✅)
 │   ├── http.py            # Shared httpx connection pool (Phase 10 ✅)
@@ -596,6 +640,7 @@ BigBrain/
 ├── plugins/               # User plugin directory (auto-discovered)
 │   ├── csv_ingester.py    # Example: CSV file ingester
 │   └── html_compiler.py   # Example: HTML page compiler
+├── wiki/                  # Generated wiki output (Phase 12, git-friendly markdown)
 ├── tests/                 # Test suite
 │   ├── ingest/            # Ingestion pipeline tests
 │   └── fixtures/ingest/   # Ingestion test fixtures
@@ -615,7 +660,7 @@ BigBrain/
 ### Running Tests
 
 ```bash
-# Run full test suite (524+ tests)
+# Run full test suite (600+ tests)
 python -m pytest tests/ -v
 
 # Run by module
@@ -630,6 +675,7 @@ python -m pytest tests/test_orchestrator.py -v # Orchestrator pipeline
 python -m pytest tests/test_plugins.py -v  # Plugin system
 python -m pytest tests/test_hardening.py -v # Production hardening
 python -m pytest tests/test_stores.py -v   # Entity store backends
+python -m pytest tests/test_wiki.py -v     # Wiki generation
 ```
 
 ## Phase Roadmap
@@ -648,6 +694,7 @@ python -m pytest tests/test_stores.py -v   # Entity store backends
 | 9     | Plugin system and extensibility               ✅   |
 | 10    | Production hardening and performance optimization ✅ |
 | 11    | Polyglot entity store (Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) ✅ |
+| 12    | LLM Wiki — auto-generated interlinked markdown wiki from KB         ✅ |
 
 ### Phase 11 Summary
 
@@ -655,6 +702,16 @@ python -m pytest tests/test_stores.py -v   # Entity store backends
 - SQLite (default, zero-config), PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone.
 - `StoreConfig` dataclass with per-backend connection settings.
 - Optional dependencies via `pyproject.toml` extras.
+
+### Phase 12A Summary
+
+- Wiki page models: `WikiPage`, `PageType`, YAML frontmatter.
+- Stable slug generator: deterministic, alias-aware, 80-char max.
+- Page generators: entity pages, source pages, overview page.
+- Wikilink cross-reference engine: auto-links entity mentions, builds link graph.
+- Deterministic file writer: skip-if-unchanged hash check, clean orphans.
+- Wiki builder orchestrator: loads KB → generates → links → writes `wiki/`.
+- CLI: `bigbrain wiki build [--doc-id] [--clean] [--dry-run]`, `bigbrain wiki status`.
 
 ## License
 

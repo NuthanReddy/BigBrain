@@ -60,6 +60,13 @@
 | `bigbrain.retry` | `with_retry()` decorator with exponential backoff; `CircuitBreaker` for repeated failure protection |
 | `bigbrain.http` | `get_http_client()` – shared `httpx.Client` with connection pooling; `close_http_client()` teardown |
 | `bigbrain.validation` | Input validators: `validate_url()`, `validate_path()`, `validate_doc_id()`, `validate_model_name()`, `sanitize_text()` |
+| `bigbrain.wiki.models` | `WikiPage`, `PageType` data models for wiki pages |
+| `bigbrain.wiki.slugger` | `make_slug()`, `make_entity_slug()`, `make_source_slug()` – deterministic slug generation |
+| `bigbrain.wiki.frontmatter` | `build_frontmatter()`, `parse_frontmatter()`, `render_page()` – YAML frontmatter for wiki pages |
+| `bigbrain.wiki.generators` | `EntityPageGenerator`, `SourcePageGenerator`, `OverviewPageGenerator` – create WikiPage objects from KB data |
+| `bigbrain.wiki.linker` | `WikiLinker` – auto-links entity mentions as `[[wikilinks]]`; `LinkGraph` tracks page-to-page edges |
+| `bigbrain.wiki.writer` | `WikiWriter` – deterministic file writer with skip-if-unchanged hash check and orphan cleanup |
+| `bigbrain.wiki.builder` | `WikiBuilder` – orchestrates wiki generation: load KB → generate pages → cross-link → write to `wiki/` |
 
 ### Subpackages
 | Subpackage | Purpose |
@@ -73,6 +80,7 @@
 | `bigbrain.notion` | **Active (Phase 6)** – Bidirectional sync between KB and Notion workspace; import, export, and sync engine |
 | `bigbrain.plugins` | **Active (Phase 9)** – Extensible plugin system for custom ingesters, compilers, and processors; directory scanning + entry_points discovery |
 | `bigbrain.stores` | **Active (Phase 11)** – Polyglot entity store backends: SQLite (default), PostgreSQL+pgvector, Neo4j, Qdrant, Weaviate, Pinecone; `EntityStoreBackend` ABC + `StoreConfig` |
+| `bigbrain.wiki` | **Active (Phase 12)** – Auto-generated interlinked markdown wiki from KB; entity/source/overview pages, wikilink cross-references, YAML frontmatter |
 | (top-level modules) | **Active (Phase 10)** – Production hardening: `progress.py` (rich progress bars), `retry.py` (retry + circuit breaker), `http.py` (connection pooling), `validation.py` (input sanitization) |
 
 ### Ingestion Pipeline (Phase 1)
@@ -131,6 +139,18 @@
 5. `IngestPlugin` subclasses are registered with the ingest registry for their `supported_extensions()`.
 6. `CompilePlugin` and `ProcessorPlugin` subclasses are stored for use by compile and distill pipelines.
 7. The `bigbrain plugins` CLI command lists all discovered plugins with name, version, type, and status.
+
+### Wiki Pipeline (Phase 12)
+1. `bigbrain.cli` parses `wiki build` with optional `--doc-id`, `--clean`, `--dry-run` flags.
+2. `WikiBuilder.from_config()` creates a `KBStore` and initialises page generators, linker, and writer.
+3. `WikiBuilder.build()` loads documents, entities, summaries, and relationships from the KB.
+4. `EntityPageGenerator.generate()` creates a `WikiPage` per entity with description, relationships, see-also wikilinks.
+5. `SourcePageGenerator.generate()` creates a `WikiPage` per document with summary, key concepts as wikilinks.
+6. `OverviewPageGenerator.generate()` creates a single overview page listing all sources and entity type counts.
+7. `WikiLinker.link_pages()` scans all page content for entity name mentions and inserts `[[wikilinks]]`; builds a `LinkGraph`.
+8. `WikiWriter.write_all()` writes pages as markdown files to `wiki/`; skips unchanged files via content hash; `clean=True` removes orphans.
+9. `WikiBuildResult` tracks page counts, links, orphans, and errors.
+10. `wiki status` lists existing wiki pages from the `wiki/` directory.
 
 ### Error Handling
 - `UserError` for user-facing errors (displayed cleanly, no traceback).
@@ -198,7 +218,7 @@ python main.py ingest --source ./docs --type pdf
 - Config sections are reserved per phase; extend the `BigBrainConfig` dataclass for new settings.
 - Subpackage `__init__.py` files contain docstrings describing each module's purpose.
 
-## File Structure (Phase 10)
+## File Structure (Phase 12)
 ```
 BigBrain/
 ├── main.py                          # Thin entry point → bigbrain.cli.main()
@@ -223,6 +243,7 @@ BigBrain/
 │   ├── test_plugins.py              # Plugin base, discovery, loader, example plugins
 │   ├── test_hardening.py            # Progress, retry, HTTP pool, validation, logging tests
 │   ├── test_stores.py               # Entity store backends: ABC, SQLite adapter, mocked external backends
+│   ├── test_wiki.py                 # Wiki models, slugger, frontmatter, generators, linker, writer, builder
 │   ├── ingest/                      # Ingestion pipeline tests
 │   │   ├── test_discovery.py
 │   │   ├── test_registry.py
@@ -322,6 +343,15 @@ BigBrain/
 │           ├── qdrant_backend.py    # QdrantBackend – vector similarity search
 │           ├── weaviate_backend.py  # WeaviateBackend – vector + BM25 hybrid search
 │           └── pinecone_backend.py  # PineconeBackend – managed vector with batched upsert
+│       └── wiki/
+│           ├── __init__.py          # Wiki exports (WikiBuilder, WikiPage, PageType)
+│           ├── models.py            # WikiPage, PageType data models
+│           ├── slugger.py           # Deterministic slug generation (80-char max)
+│           ├── frontmatter.py       # YAML frontmatter build/parse/render
+│           ├── generators.py        # Entity, source, overview page generators
+│           ├── linker.py            # Wikilink cross-reference engine + LinkGraph
+│           ├── writer.py            # Deterministic file writer (skip-if-unchanged)
+│           └── builder.py           # WikiBuilder orchestrator
 │       ├── progress.py              # Progress bars with rich (graceful fallback)
 │       ├── retry.py                 # with_retry() decorator + CircuitBreaker
 │       ├── http.py                  # Shared httpx.Client with connection pooling
@@ -329,12 +359,13 @@ BigBrain/
 ├── plugins/                         # User plugin directory (auto-discovered)
 │   ├── csv_ingester.py              # Example: CSV file ingester
 │   └── html_compiler.py             # Example: HTML page compiler
+├── wiki/                            # Generated wiki output (Phase 12, git-friendly markdown)
 └── AGENTS.md                        # This file
 ```
 
 ## Integration Points and Dependencies
 
-### Current (Phase 0–11)
+### Current (Phase 0–12)
 - **pyyaml** (`>=6.0`) – YAML config file loading.
 - **sqlite3** (stdlib) – SQLite-backed knowledge base persistence with FTS5 full-text search (Phase 2).
 - **httpx** (`>=0.27`) – HTTP client for AI provider APIs (Phase 3) and URL/API ingestion (Phase 8).
@@ -369,4 +400,5 @@ BigBrain/
 | 9 | Plugin system | Extensible plugin architecture for custom ingesters, compilers, processors ✅ |
 | 10 | Production hardening | Progress bars, retry/circuit-breaker, HTTP pooling, input validation, enhanced logging ✅ |
 | 11 | Polyglot Entity Store | Pluggable distilled-entity/vector backends (SQLite default, Postgres+pgvector, Neo4j, Qdrant, Weaviate, Pinecone) ✅ |
+| 12 | LLM Wiki | Auto-generated interlinked markdown wiki from KB with wikilinks and YAML frontmatter ✅ |
 
