@@ -69,7 +69,7 @@ Then include:
 - ## Complexity Analysis table if applicable
 - Theorems stated formally, data structures with operations, concrete examples
 
-IMPORTANT: Write ALL chapters below. Separate each with "# <Chapter Title>" on its own line.
+CRITICAL: You MUST write ALL chapters listed below. Do NOT truncate, skip, or say "continue later". Separate each with "# <Chapter Title>" on its own line.
 
 {chapters_block}
 
@@ -123,8 +123,9 @@ def _slugify(text: str) -> str:
     return text.strip("-")[:80]
 
 
-# Max chars of source text per batch (~10K tokens ≈ 40K chars, leave room for prompt+response)
-_BATCH_MAX_CHARS = 30000
+# Max chars of source text per batch — keep small so AI response fits in ~16K output tokens
+# 2-3 chapters per batch is optimal for detailed study notes
+_BATCH_MAX_CHARS = 15000
 
 
 def _split_batch_response(response: str, titles: list[str]) -> dict[str, str]:
@@ -301,11 +302,11 @@ class DigestBuilder:
     def _generate_base_digest(
         self, doc: Document, *, model: str = "", force: bool = False,
     ) -> DigestResult:
-        """Generate study notes by batching chapters into minimal API calls.
+        """Generate study notes: one API call per chapter.
 
-        Groups chapters into batches that fit within ~30K chars of source
-        text per call. The AI writes all chapters in one response, then
-        we split by '# <title>' headings and save each to a file.
+        With TOC-based grouping, a 1300-page PDF becomes ~35 chapters.
+        Each call gets the full chapter text and produces detailed notes.
+        Cached files are skipped on re-runs.
         """
         result = DigestResult()
         doc_slug = _slugify(doc.title)
@@ -329,119 +330,49 @@ class DigestBuilder:
             return result
 
         # Filter to chapters that need processing
-        to_process: list[tuple[str, str]] = []
+        to_process: list[tuple[str, str, Path]] = []
         for title, content in chapters:
             if not content.strip():
                 result.skipped += 1
                 continue
-            slug = _slugify(title) or f"chapter-{len(to_process) + 1:02d}"
+            slug = _slugify(title) or f"chapter-{len(to_process) + result.skipped + 1:02d}"
             out_path = out_dir / f"{slug}.md"
             if out_path.exists() and not force:
                 result.skipped += 1
                 result.digest_files.append(str(out_path))
                 continue
-            to_process.append((title, content))
+            to_process.append((title, content, out_path))
 
         if not to_process:
             logger.info("All chapters cached for %s", doc.title)
             return result
 
-        # Batch chapters into groups that fit within the token budget
-        batches: list[list[tuple[str, str]]] = []
-        current_batch: list[tuple[str, str]] = []
-        current_size = 0
-
-        for title, content in to_process:
-            item_size = len(content[:8000])  # cap per-chapter source text
-            if current_batch and current_size + item_size > _BATCH_MAX_CHARS:
-                batches.append(current_batch)
-                current_batch = []
-                current_size = 0
-            current_batch.append((title, content))
-            current_size += item_size
-
-        if current_batch:
-            batches.append(current_batch)
-
         logger.info(
-            "Digest: %d chapters in %d API call(s) for %s",
-            len(to_process), len(batches), doc.title,
+            "Digest: %d chapters to process (%d cached) for %s",
+            len(to_process), result.skipped, doc.title,
         )
 
-        # Process each batch with one API call
-        for batch_idx, batch in enumerate(batches):
-            titles = [t for t, _ in batch]
-
-            # Build the chapters block for the prompt
-            chapters_block_parts: list[str] = []
-            for title, content in batch:
-                truncated = content[:8000]
-                chapters_block_parts.append(
-                    f"=== {title} ===\n{truncated}"
-                )
-            chapters_block = "\n\n---\n\n".join(chapters_block_parts)
-
-            # Single batch prompt or per-chapter for single items
-            if len(batch) == 1:
-                title, content = batch[0]
-                prompt = _DIGEST_TEMPLATE.format(
-                    doc_title=doc.title,
-                    section_title=title,
-                    content=content[:12000],
-                )
-            else:
-                prompt = _DIGEST_BATCH_TEMPLATE.format(
-                    doc_title=doc.title,
-                    chapters_block=chapters_block,
-                )
+        for i, (title, content, out_path) in enumerate(to_process):
+            prompt = _DIGEST_TEMPLATE.format(
+                doc_title=doc.title,
+                section_title=title,
+                content=content[:12000],
+            )
 
             try:
                 resp = self._registry.chat(
                     [{"role": "system", "content": _DIGEST_SYSTEM},
                      {"role": "user", "content": prompt}],
-                    model=model, max_tokens=4000 * len(batch),
+                    model=model, max_tokens=4096,
                 )
-                response_text = resp.text.strip()
-
-                if len(batch) == 1:
-                    # Single chapter — save directly
-                    title = titles[0]
-                    slug = _slugify(title) or f"chapter-{result.written + 1:02d}"
-                    out_path = out_dir / f"{slug}.md"
-                    out_path.write_text(f"# {title}\n\n{response_text}\n", encoding="utf-8")
-                    result.written += 1
-                    result.digest_files.append(str(out_path))
-                    logger.info("Wrote: %s", out_path)
-                else:
-                    # Split batched response by chapter headings
-                    chapter_map = _split_batch_response(response_text, titles)
-
-                    for title in titles:
-                        content = chapter_map.get(title, "")
-                        if not content:
-                            # Try fuzzy match
-                            for key, val in chapter_map.items():
-                                if title.lower()[:20] in key.lower():
-                                    content = val
-                                    break
-
-                        slug = _slugify(title) or f"chapter-{result.written + 1:02d}"
-                        out_path = out_dir / f"{slug}.md"
-
-                        if content:
-                            out_path.write_text(content + "\n", encoding="utf-8")
-                            result.written += 1
-                            result.digest_files.append(str(out_path))
-                            logger.info("Wrote: %s", out_path)
-                        else:
-                            result.errors.append(f"{title}: not found in batch response")
-                            logger.warning("Chapter '%s' missing from batch %d response", title, batch_idx + 1)
-
-                logger.info("Batch %d/%d: processed %d chapters", batch_idx + 1, len(batches), len(batch))
-
+                markdown = f"# {title}\n\n{resp.text.strip()}\n"
+                out_path.write_text(markdown, encoding="utf-8")
+                result.written += 1
+                result.digest_files.append(str(out_path))
+                logger.info("[%d/%d] Wrote: %s", i + 1, len(to_process), out_path.name)
             except Exception as exc:
-                result.errors.append(f"Batch {batch_idx + 1}: {exc}")
-                logger.warning("Batch %d failed: %s", batch_idx + 1, exc)
+                result.errors.append(f"{title}: {exc}")
+                logger.warning("[%d/%d] Failed: %s — %s", i + 1, len(to_process), title, exc)
 
         return result
 
