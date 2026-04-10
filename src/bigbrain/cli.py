@@ -1434,7 +1434,7 @@ def _handle_digest(args: argparse.Namespace) -> int:
     target = getattr(args, 'to', 'markdown') or 'markdown'
     output = args.output or "digest"
     notion_parent = getattr(args, 'notion_parent', '') or ''
-    on_duplicate = getattr(args, 'on_duplicate', 'skip') or 'skip'
+    on_duplicate = getattr(args, 'conflict_resolution', 'skip') or 'skip'
 
     # Resolve Notion parent if needed
     if target == "notion":
@@ -1531,10 +1531,10 @@ def _add_digest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         help="Notion parent page name or UUID (required for --to notion)",
     )
     p.add_argument(
-        "--on-duplicate",
-        choices=["skip", "overwrite", "merge"],
+        "--conflict-resolution",
+        choices=["skip", "overwrite", "merge", "delete"],
         default="skip",
-        help="Duplicate handling: skip (default), overwrite, merge (append new content)",
+        help="Duplicate handling: skip (default), overwrite, merge (append new), delete (remove old)",
     )
     p.set_defaults(func=_handle_digest)
     return p
@@ -1568,6 +1568,85 @@ def _add_status_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         help="Show only counts, skip document listing",
     )
     p.set_defaults(func=_handle_status)
+    return p
+
+
+def _handle_kb_delete(args: argparse.Namespace) -> int:
+    """Delete documents from the knowledge base."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty.")
+        return 0
+
+    from bigbrain.kb.store import KBStore
+
+    with KBStore(db_path) as store:
+        if args.doc_id:
+            # Delete specific document(s)
+            for raw_id in args.doc_id:
+                doc_id = _resolve_doc_id(store, raw_id)
+                if not doc_id:
+                    print(f"  Not found: {raw_id}")
+                    continue
+                doc = store.get_document(doc_id)
+                title = doc.title if doc else doc_id
+                if store.delete_document(doc_id):
+                    print(f"  Deleted: {title} ({doc_id})")
+                else:
+                    print(f"  Not found: {doc_id}")
+
+        elif args.type:
+            # Delete all documents of a type
+            docs = store.list_documents(source_type=args.type, limit=9999)
+            if not docs:
+                print(f"No documents of type '{args.type}' found.")
+                return 0
+            print(f"Deleting {len(docs)} {args.type} document(s)...")
+            for doc in docs:
+                store.delete_document(doc.id)
+                print(f"  Deleted: {doc.title}")
+
+        elif args.all:
+            docs = store.list_documents(limit=9999)
+            if not docs:
+                print("Knowledge base is already empty.")
+                return 0
+            print(f"Deleting ALL {len(docs)} documents...")
+            for doc in docs:
+                store.delete_document(doc.id)
+                print(f"  Deleted: {doc.title}")
+        else:
+            print("Specify --doc-id, --type, or --all. Use 'bigbrain status' to list documents.")
+            return 1
+
+    return 0
+
+
+def _add_kb_delete_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``kb-delete`` subcommand."""
+    p = subparsers.add_parser(
+        "kb-delete",
+        help="Delete documents from the knowledge base",
+        description="Delete specific documents, all of a type, or everything.",
+    )
+    p.add_argument(
+        "--doc-id", type=str, nargs="+", default=None,
+        help="Document ID(s) to delete (prefix OK)",
+    )
+    p.add_argument(
+        "--type", type=str, default="",
+        help="Delete all documents of this source type (pdf, notion, txt, etc.)",
+    )
+    p.add_argument(
+        "--all", action="store_true", default=False,
+        help="Delete ALL documents from the knowledge base",
+    )
+    p.set_defaults(func=_handle_kb_delete)
     return p
 
 
@@ -2055,7 +2134,7 @@ def _handle_notion(args: argparse.Namespace) -> int:
             print("Notion is not available. Check your token.")
             return 1
 
-        strategy = getattr(args, 'on_duplicate', 'archive')
+        strategy = getattr(args, 'conflict_resolution', None) or getattr(args, 'on_duplicate', 'archive')
         print(f"Scanning for duplicate pages (strategy: {strategy})...")
 
         def _normalize_title(t: str) -> str:
@@ -2356,10 +2435,10 @@ def _add_notion_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
         help="Max pages to import (default: 20)",
     )
     p.add_argument(
-        "--on-duplicate",
-        choices=["archive", "rename", "report"],
+        "--conflict-resolution",
+        choices=["archive", "rename", "report", "delete"],
         default="archive",
-        help="Cleanup strategy for duplicates: archive (trash), rename (prefix with [MERGED]), report (list only)",
+        help="Cleanup strategy: archive (trash), rename ([MERGED] prefix), report (list only), delete (permanent)",
     )
     p.set_defaults(func=_handle_notion)
     return p
@@ -2585,6 +2664,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_digest_parser(subparsers)
     _add_update_parser(subparsers)
     _add_status_parser(subparsers)
+    _add_kb_delete_parser(subparsers)
     _add_kb_search_parser(subparsers)
     _add_kb_export_parser(subparsers)
     _add_kb_import_parser(subparsers)
