@@ -1,12 +1,6 @@
 # Contents
 
-Contents
-Preface
-xiii
-I
-Foundations
-Introduction
-The Role of Algorithms in Computing
+Preface xiii I Foundations Introduction The Role of Algorithms in Computing
 
 ## 1.1 Algorithms
 
@@ -54,12 +48,7 @@ Probabilistic Analysis and Randomized Algorithms
 
 ## 5.4 Probabilistic analysis and further uses of indicator random variables
 
-vi
-Contents
-II
-Sorting and Order Statistics
-Introduction
-Heapsort
+vi II Sorting and Order Statistics Introduction Heapsort
 
 ## 6.1 Heaps
 
@@ -99,10 +88,7 @@ Medians and Order Statistics
 
 ## 9.3 Selection in worst-case linear time
 
-III
-Data Structures
-Introduction
-Elementary Data Structures
+III Data Structures Introduction Elementary Data Structures
 
 ## 10.1 Stacks and queues
 
@@ -126,9 +112,7 @@ Hash Tables
 
 ## 11.5 Perfect hashing
 
-Contents
-vii
-Binary Search Trees
+vii Binary Search Trees
 
 ## 12.1 What is a binary search tree?
 
@@ -158,10 +142,7 @@ Augmenting Data Structures
 
 ## 14.3 Interval trees
 
-IV
-Advanced Design and Analysis Techniques
-Introduction
-Dynamic Programming
+IV Advanced Design and Analysis Techniques Introduction Dynamic Programming
 
 ## 15.1 Rod cutting
 
@@ -199,12 +180,7 @@ Amortized Analysis
 
 ## 17.4 Dynamic tables
 
-viii
-Contents
-V
-Advanced Data Structures
-Introduction
-B-Trees
+viii V Advanced Data Structures Introduction B-Trees
 
 ## 18.1 Deﬁnition of B-trees
 
@@ -242,10 +218,7 @@ Data Structures for Disjoint Sets
 
 ## 21.4 Analysis of union by rank with path compression
 
-VI
-Graph Algorithms
-Introduction
-Elementary Graph Algorithms
+VI Graph Algorithms Introduction Elementary Graph Algorithms
 
 ## 22.1 Representations of graphs
 
@@ -263,9 +236,7 @@ Minimum Spanning Trees
 
 ## 23.2 The algorithms of Kruskal and Prim
 
-Contents
-ix
-Single-Source Shortest Paths
+ix Single-Source Shortest Paths
 
 ## 24.1 The Bellman-Ford algorithm
 
@@ -301,10 +272,7 @@ Maximum Flow
 
 ## 26.5 The relabel-to-front algorithm
 
-VII
-Selected Topics
-Introduction
-Multithreaded Algorithms
+VII Selected Topics Introduction Multithreaded Algorithms
 
 ## 27.1 The basics of dynamic multithreading
 
@@ -332,9 +300,7 @@ Linear Programming
 
 ## 29.5 The initial basic feasible solution
 
-x
-Contents
-Polynomials and the FFT
+x Polynomials and the FFT
 
 ## 30.1 Representing polynomials
 
@@ -412,47 +378,8 @@ Approximation Algorithms
 
 ## 35.5 The subset-sum problem
 
-Contents
-xi
-VIII
-Appendix: Mathematical Background
-Introduction
-A
-Summations
-A.1
-Summation formulas and properties
-A.2
-Bounding summations
-B
-Sets, Etc.
-B.1
-Sets
-B.2
-Relations
-B.3
-Functions
-B.4
-Graphs
-B.5
-Trees
-C
-Counting and Probability
-C.1
-Counting
-C.2
-Probability
-C.3
-Discrete random variables
-C.4
-The geometric and binomial distributions
-?
-C.5
-The tails of the binomial distribution
-D
-Matrices
-D.1
-Matrices and matrix operations
-D.2
-Basic matrix properties
-Bibliography
-Index
+xi VIII Appendix: Mathematical Background Introduction A Summations A.1 Summation formulas and properties A.2 Bounding summations B Sets, Etc.
+
+B.1 Sets B.2 Relations B.3 Functions B.4 Graphs B.5 Trees C Counting and Probability C.1 Counting C.2 Probability C.3 Discrete random variables C.4 The geometric and binomial distributions ?
+
+C.5 The tails of the binomial distribution D Matrices D.1 Matrices and matrix operations D.2 Basic matrix properties Bibliography Index

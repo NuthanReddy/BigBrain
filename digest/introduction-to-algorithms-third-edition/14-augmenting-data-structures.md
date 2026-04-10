@@ -1,22 +1,27 @@
 # 14 Augmenting Data Structures
 
+14
 Augmenting Data Structures
-Some engineering situations require no more than a “textbook” data structure—such as a doubly linked list, a hash table, or a binary search tree—but many
-others require a dash of creativity. Only in rare situations will you need to create an entirely new type of data structure, though. More often, it will sufﬁce to
+Some engineering situations require no more than a “textbook” data struc-
+ture—such as a doubly linked list, a hash table, or a binary search tree—but many
+others require a dash of creativity. Only in rare situations will you need to cre-
+ate an entirely new type of data structure, though. More often, it will sufﬁce to
 augment a textbook data structure by storing additional information in it. You can
-then program new operations for the data structure to support the desired application. Augmenting a data structure is not always straightforward, however, since the
+then program new operations for the data structure to support the desired applica-
+tion. Augmenting a data structure is not always straightforward, however, since the
 added information must be updated and maintained by the ordinary operations on
 the data structure.
-This chapter discusses two data structures that we construct by augmenting redblack trees. Section 14.1 describes a data structure that supports general orderstatistic operations on a dynamic set. We can then quickly ﬁnd the ith smallest
+This chapter discusses two data structures that we construct by augmenting red-
+black trees. Section 14.1 describes a data structure that supports general order-
+statistic operations on a dynamic set. We can then quickly ﬁnd the ith smallest
 number in a set or the rank of a given element in the total ordering of the set.
 Section 14.2 abstracts the process of augmenting a data structure and provides a
 theorem that can simplify the process of augmenting red-black trees. Section 14.3
 uses this theorem to help design a data structure for maintaining a dynamic set of
 intervals, such as time intervals. Given a query interval, we can then quickly ﬁnd
 an interval in the set that overlaps it.
-
-## 14.1 Dynamic order statistics
-
+14.1
+Dynamic order statistics
 Chapter 9 introduced the notion of an order statistic. Speciﬁcally, the ith order
 statistic of a set of n elements, where i 2 f1; 2; : : : ; ng, is simply the element in the
 set with the ith smallest key. We saw how to determine any order statistic in O.n/
@@ -25,6 +30,49 @@ trees so that we can determine any order statistic for a dynamic set in O.lg n/ 
 We shall also see how to compute the rank of an element—its position in the linear
 order of the set—in O.lg n/ time.
 
+340
+Chapter 14
+Augmenting Data Structures
+1
+3
+7
+12
+10
+14
+16
+14
+2
+1
+1
+2
+4
+7
+20
+19
+21
+21
+17
+28
+35
+39
+38
+47
+30
+41
+26
+1
+2
+1
+4
+12
+1
+1
+1
+3
+5
+1
+7
+20
 key
 size
 Figure 14.1
@@ -47,19 +95,28 @@ position at which it would be printed in an inorder walk of the tree. In Figure 
 for example, the key 14 stored in a black node has rank 5, and the key 14 stored in
 a red node has rank 6.
 Retrieving an element with a given rank
-Before we show how to maintain this size information during insertion and deletion, let us examine the implementation of two order-statistic queries that use this
+Before we show how to maintain this size information during insertion and dele-
+tion, let us examine the implementation of two order-statistic queries that use this
 additional information. We begin with an operation that retrieves an element with
-a given rank. The procedure OS-SELECT.x; i/ returns a pointer to the node containing the ith smallest key in the subtree rooted at x. To ﬁnd the node with the ith
+a given rank. The procedure OS-SELECT.x; i/ returns a pointer to the node con-
+taining the ith smallest key in the subtree rooted at x. To ﬁnd the node with the ith
 smallest key in an order-statistic tree T , we call OS-SELECT.T:root; i/.
 
-## 14.1 Dynamic order statistics
-
+14.1
+Dynamic order statistics
+341
 OS-SELECT.x; i/
+1
 r D x:left:size C 1
+2
 if i == r
+3
 return x
+4
 elseif i < r
+5
 return OS-SELECT.x:left; i/
+6
 else return OS-SELECT.x:right; i  r/
 In line 1 of OS-SELECT, we compute r, the rank of node x within the subtree
 rooted at x. The value of x:left:size is the number of nodes that come before x
@@ -71,12 +128,14 @@ the ith smallest element resides in x’s right subtree. Since the subtree roote
 contains r elements that come before x’s right subtree in an inorder tree walk, the
 ith smallest element in the subtree rooted at x is the .i  r/th smallest element in
 the subtree rooted at x:right. Line 6 determines this element recursively.
-To see how OS-SELECT operates, consider a search for the 17th smallest element in the order-statistic tree of Figure 14.1. We begin with x as the root, whose
+To see how OS-SELECT operates, consider a search for the 17th smallest ele-
+ment in the order-statistic tree of Figure 14.1. We begin with x as the root, whose
 key is 26, and with i D 17. Since the size of 26’s left subtree is 12, its rank is 13.
 Thus, we know that the node with rank 17 is the 17  13 D 4th smallest element
 in 26’s right subtree. After the recursive call, x is the node with key 41, and i D 4.
 Since the size of 41’s left subtree is 5, its rank within its subtree is 6. Thus, we
-know that the node with rank 4 is the 4th smallest element in 41’s left subtree. After the recursive call, x is the node with key 30, and its rank within its subtree is 2.
+know that the node with rank 4 is the 4th smallest element in 41’s left subtree. Af-
+ter the recursive call, x is the node with key 30, and its rank within its subtree is 2.
 Thus, we recurse once again to ﬁnd the 42 D 2nd smallest element in the subtree
 rooted at the node with key 38. We now ﬁnd that its left subtree has size 1, which
 means it is the second smallest element. Thus, the procedure returns a pointer to
@@ -90,13 +149,23 @@ Given a pointer to a node x in an order-statistic tree T , the procedure OS-RANK
 returns the position of x in the linear order determined by an inorder tree walk
 of T .
 
+342
+Chapter 14
+Augmenting Data Structures
 OS-RANK.T; x/
+1
 r D x:left:size C 1
+2
 y D x
+3
 while y ¤ T:root
+4
 if y == y:p:right
+5
 r D r C y:p:left:size C 1
+6
 y D y:p
+7
 return r
 The procedure works as follows. We can think of node x’s rank as the number of
 nodes preceding x in an inorder tree walk, plus 1 for x itself. OS-RANK maintains
@@ -126,9 +195,22 @@ of y:key and r at the top of the while loop:
 iteration
 y:key
 r
+1
+38
+2
+2
+30
+4
+3
+41
+4
+4
+26
+17
 
-## 14.1 Dynamic order statistics
-
+14.1
+Dynamic order statistics
+343
 The procedure returns the rank 17.
 Since each iteration of the while loop takes O.1/ time, and y goes up one level in
 the tree with each iteration, the running time of OS-RANK is at worst proportional
@@ -138,7 +220,8 @@ Given the size attribute in each node, OS-SELECT and OS-RANK can quickly
 compute order-statistic information. But unless we can efﬁciently maintain these
 attributes within the basic modifying operations on red-black trees, our work will
 have been for naught. We shall now show how to maintain subtree sizes for both
-insertion and deletion without affecting the asymptotic running time of either operation.
+insertion and deletion without affecting the asymptotic running time of either op-
+eration.
 We noted in Section 13.3 that insertion into a red-black tree consists of two
 phases. The ﬁrst phase goes down the tree from the root, inserting the new node
 as a child of an existing node. The second phase goes up the tree, changing colors
@@ -152,10 +235,13 @@ are caused by rotations, of which there are at most two. Moreover, a rotation is
 a local operation: only two nodes have their size attributes invalidated. The link
 around which the rotation is performed is incident on these two nodes. Referring
 to the code for LEFT-ROTATE.T; x/ in Section 13.2, we add the following lines:
+13
 y:size D x:size
+14
 x:size D x:left:size C x:right:size C 1
 Figure 14.2 illustrates how the attributes are updated.
-The change to RIGHTROTATE is symmetric.
+The change to RIGHT-
+ROTATE is symmetric.
 Since at most two rotations are performed during insertion into a red-black tree,
 we spend only O.1/ additional time updating size attributes in the second phase.
 Thus, the total time for insertion into an n-node order-statistic tree is O.lg n/,
@@ -167,47 +253,62 @@ either removes one node y from the tree or moves upward it within the tree. To
 update the subtree sizes, we simply traverse a simple path from node y (starting
 from its original position within the tree) up to the root, decrementing the size
 
-```
+344
+Chapter 14
+Augmenting Data Structures
 LEFT-ROTATE(T, x)
-
-```
 RIGHT-ROTATE(T, y)
+93
+19
 y
+42
+11
 x
+6
+4
+7
+93
+42
+19
+12
+6
+4
+7
 x
 y
 Figure 14.2
-```
-
 Updating subtree sizes during rotations. The link around which we rotate is incident
 on the two nodes whose size attributes need to be updated. The updates are local, requiring only the
 size information stored in x, y, and the roots of the subtrees shown as triangles.
-attribute of each node on the path. Since this path has length O.lg n/ in an nnode red-black tree, the additional time spent maintaining size attributes in the ﬁrst
+attribute of each node on the path. Since this path has length O.lg n/ in an n-
+node red-black tree, the additional time spent maintaining size attributes in the ﬁrst
 phase is O.lg n/. We handle the O.1/ rotations in the second phase of deletion
 in the same manner as for insertion. Thus, both insertion and deletion, including
 maintaining the size attributes, take O.lg n/ time for an n-node order-statistic tree.
-
-## Exercises
-
+Exercises
 14.1-1
-Show how OS-SELECT.T:root; 10/ operates on the red-black tree T of Figure 14.1.
+Show how OS-SELECT.T:root; 10/ operates on the red-black tree T of Fig-
+ure 14.1.
 14.1-2
 Show how OS-RANK.T; x/ operates on the red-black tree T of Figure 14.1 and
 the node x with x:key D 35.
 14.1-3
 Write a nonrecursive version of OS-SELECT.
 14.1-4
-Write a recursive procedure OS-KEY-RANK.T; k/ that takes as input an orderstatistic tree T and a key k and returns the rank of k in the dynamic set represented
+Write a recursive procedure OS-KEY-RANK.T; k/ that takes as input an order-
+statistic tree T and a key k and returns the rank of k in the dynamic set represented
 by T . Assume that the keys of T are distinct.
 14.1-5
 Given an element x in an n-node order-statistic tree and a natural number i, how
 can we determine the ith successor of x in the linear order of the tree in O.lg n/
 time?
 
-## 14.2 How to augment a data structure
-
+14.2
+How to augment a data structure
+345
 14.1-6
-Observe that whenever we reference the size attribute of a node in either OSSELECT or OS-RANK, we use it only to compute a rank. Accordingly, suppose
+Observe that whenever we reference the size attribute of a node in either OS-
+SELECT or OS-RANK, we use it only to compute a rank. Accordingly, suppose
 we store in each node its rank in the subtree of which it is the root. Show how to
 maintain this information during insertion and deletion. (Remember that these two
 operations can cause rotations.)
@@ -216,16 +317,17 @@ Show how to use an order-statistic tree to count the number of inversions (see
 Problem 2-4) in an array of size n in time O.n lg n/.
 14.1-8
 ?
-Consider n chords on a circle, each deﬁned by its endpoints. Describe an O.n lg n/time algorithm to determine the number of pairs of chords that intersect inside the
+Consider n chords on a circle, each deﬁned by its endpoints. Describe an O.n lg n/-
+time algorithm to determine the number of pairs of chords that intersect inside the
 circle. (For example, if the n chords are all diameters that meet at the center, then
 the correct answer is
 
 n
+2
 
 .) Assume that no two chords share an endpoint.
-
-## 14.2 How to augment a data structure
-
+14.2
+How to augment a data structure
 The process of augmenting a basic data structure to support additional functionality
 occurs quite frequently in algorithm design. We shall use it again in the next section
 to design a data structure that supports operations on intervals. In this section, we
@@ -241,13 +343,18 @@ As with any prescriptive design method, you should not blindly follow the steps
 in the order given. Most design work contains an element of trial and error, and
 progress on all steps usually proceeds in parallel. There is no point, for example, in
 determining additional information and developing new operations (steps 2 and 4)
-if we will not be able to maintain the additional information efﬁciently. Nevertheless, this four-step method provides a good focus for your efforts in augmenting
+if we will not be able to maintain the additional information efﬁciently. Neverthe-
+less, this four-step method provides a good focus for your efforts in augmenting
 a data structure, and it is also a good way to organize the documentation of an
 augmented data structure.
 
+346
+Chapter 14
+Augmenting Data Structures
 We followed these steps in Section 14.1 to design our order-statistic trees. For
 step 1, we chose red-black trees as the underlying data structure. A clue to the
-suitability of red-black trees comes from their efﬁcient support of other dynamicset operations on a total order, such as MINIMUM, MAXIMUM, SUCCESSOR, and
+suitability of red-black trees comes from their efﬁcient support of other dynamic-
+set operations on a total order, such as MINIMUM, MAXIMUM, SUCCESSOR, and
 PREDECESSOR.
 For step 2, we added the size attribute, in which each node x stores the size of the
 subtree rooted at x. Generally, the additional information makes operations more
@@ -255,10 +362,12 @@ efﬁcient. For example, we could have implemented OS-SELECT and OS-RANK
 using just the keys stored in the tree, but they would not have run in O.lg n/ time.
 Sometimes, the additional information is pointer information rather than data, as
 in Exercise 14.2-1.
-For step 3, we ensured that insertion and deletion could maintain the size attributes while still running in O.lg n/ time. Ideally, we should need to update only
+For step 3, we ensured that insertion and deletion could maintain the size at-
+tributes while still running in O.lg n/ time. Ideally, we should need to update only
 a few elements of the data structure in order to maintain the additional information.
 For example, if we simply stored in each node its rank in the tree, the OS-SELECT
-and OS-RANK procedures would run quickly, but inserting a new minimum element would cause a change to this information in every node of the tree. When we
+and OS-RANK procedures would run quickly, but inserting a new minimum ele-
+ment would cause a change to this information in every node of the tree. When we
 store subtree sizes instead, inserting a new element causes information to change
 in only O.lg n/ nodes.
 For step 4, we developed the operations OS-SELECT and OS-RANK. After all,
@@ -266,12 +375,12 @@ the need for new operations is why we bother to augment a data structure in the 
 place. Occasionally, rather than developing new operations, we use the additional
 information to expedite existing ones, as in Exercise 14.2-1.
 Augmenting red-black trees
-When red-black trees underlie an augmented data structure, we can prove that insertion and deletion can always efﬁciently maintain certain kinds of additional information, thereby making step 3 very easy. The proof of the following theorem is
+When red-black trees underlie an augmented data structure, we can prove that in-
+sertion and deletion can always efﬁciently maintain certain kinds of additional in-
+formation, thereby making step 3 very easy. The proof of the following theorem is
 similar to the argument from Section 14.1 that we can maintain the size attribute
 for order-statistic trees.
-
-> **Theorem 14.1 (Augmenting a red-black tree)**
-
+Theorem 14.1 (Augmenting a red-black tree)
 Let f be an attribute that augments a red-black tree T of n nodes, and suppose that
 the value of f for each node x depends on only the information in nodes x, x:left,
 and x:right, possibly including x:left:f and x:right:f. Then, we can maintain the
@@ -280,11 +389,15 @@ affecting the O.lg n/ performance of these operations.
 Proof
 The main idea of the proof is that a change to an f attribute in a node x
 propagates only to ancestors of x in the tree.
-That is, changing x:f may re14.2
+That is, changing x:f may re-
+
+14.2
 How to augment a data structure
+347
 quire x:p:f to be updated, but nothing else; updating x:p:f may require x:p:p:f
 to be updated, but nothing else; and so on up the tree. Once we have updated
-T:root:f, no other node will depend on the new value, and so the process terminates. Since the height of a red-black tree is O.lg n/, changing an f attribute in a
+T:root:f, no other node will depend on the new value, and so the process termi-
+nates. Since the height of a red-black tree is O.lg n/, changing an f attribute in a
 node costs O.lg n/ time in updating all nodes that depend on the change.
 Insertion of a node x into T consists of two phases. (See Section 13.3.) The
 ﬁrst phase inserts x as a child of an existing node x:p. We can compute the value
@@ -307,22 +420,26 @@ the total time for deletion is O.lg n/.
 In many cases, such as maintaining the size attributes in order-statistic trees, the
 cost of updating after a rotation is O.1/, rather than the O.lg n/ derived in the proof
 of Theorem 14.1. Exercise 14.2-3 gives an example.
-
-## Exercises
-
+Exercises
 14.2-1
 Show, by adding pointers to the nodes, how to support each of the dynamic-set
-queries MINIMUM, MAXIMUM, SUCCESSOR, and PREDECESSOR in O.1/ worstcase time on an augmented order-statistic tree. The asymptotic performance of
+queries MINIMUM, MAXIMUM, SUCCESSOR, and PREDECESSOR in O.1/ worst-
+case time on an augmented order-statistic tree. The asymptotic performance of
 other operations on order-statistic trees should not be affected.
 14.2-2
 Can we maintain the black-heights of nodes in a red-black tree as attributes in the
-nodes of the tree without affecting the asymptotic performance of any of the redblack tree operations? Show how, or argue why not. How about maintaining the
+nodes of the tree without affecting the asymptotic performance of any of the red-
+black tree operations? Show how, or argue why not. How about maintaining the
 depths of nodes?
 
+348
+Chapter 14
+Augmenting Data Structures
 14.2-3
 ?
 Let ˝ be an associative binary operator, and let a be an attribute maintained in each
-node of a red-black tree. Suppose that we want to include in each node x an additional attribute f such that x:f D x1:a ˝ x2:a ˝    ˝ xm:a, where x1; x2; : : : ; xm
+node of a red-black tree. Suppose that we want to include in each node x an addi-
+tional attribute f such that x:f D x1:a ˝ x2:a ˝    ˝ xm:a, where x1; x2; : : : ; xm
 is the inorder listing of nodes in the subtree rooted at x. Show how to update the f
 attributes in O.1/ time after a rotation. Modify your argument slightly to apply it
 to the size attributes in order-statistic trees.
@@ -333,9 +450,8 @@ that outputs all the keys k such that a  k  b in a red-black tree rooted at x.
 Describe how to implement RB-ENUMERATE in ‚.mClg n/ time, where m is the
 number of keys that are output and n is the number of internal nodes in the tree.
 (Hint: You do not need to add new attributes to the red-black tree.)
-
-## 14.3 Interval trees
-
+14.3
+Interval trees
 In this section, we shall augment red-black trees to support operations on dynamic
 sets of intervals. A closed interval is an ordered pair of real numbers Œt1; t2, with
 t1  t2. The interval Œt1; t2 represents the set ft 2 R W t1  t  t2g. Open and
@@ -358,8 +474,9 @@ An interval tree is a red-black tree that maintains a dynamic set of elements, w
 each element x containing an interval x:int. Interval trees support the following
 operations:
 
-## 14.3 Interval trees
-
+14.3
+Interval trees
+349
 i
 i
 i
@@ -400,19 +517,57 @@ We must verify that insertion and deletion take O.lg n/ time on an interval tree
 of n nodes. We can determine x:max given interval x:int and the max values of
 node x’s children:
 
+350
+Chapter 14
+Augmenting Data Structures
+0
+5
+10
+15
+20
+25
+30
+0
+5
+6
+8
+15
+16
+17
+19
+25
 26 26
+30
+20
+19
+21
+23
+9
+10
+8
+3
 (a)
 [0,3]
+3
 [6,10]
+10
 [5,8]
+10
 [8,9]
+23
 [15,23]
+23
 [16,21]
+30
 [17,19]
+20
 [26,26]
+26
 [19,20]
+20
 (b)
 [25,30]
+30
 int
 max
 Figure 14.4
@@ -429,14 +584,21 @@ The only new operation we need is INTERVAL-SEARCH.T; i/, which ﬁnds a node
 in tree T whose interval overlaps interval i. If there is no interval that overlaps i in
 the tree, the procedure returns a pointer to the sentinel T:nil.
 
-## 14.3 Interval trees
-
+14.3
+Interval trees
+351
 INTERVAL-SEARCH.T; i/
+1
 x D T:root
+2
 while x ¤ T:nil and i does not overlap x:int
+3
 if x:left ¤ T:nil and x:left:max  i:low
+4
 x D x:left
+5
 else x D x:right
+6
 return x
 The search for an interval that overlaps i starts with x at the root of the tree and
 proceeds downward. It terminates when either it ﬁnds an overlapping interval or x
@@ -452,21 +614,26 @@ does not overlap i. This time, x:left:max D 10 is less than i:low D 22, and so t
 loop continues with the right child of x as the new x. Because the interval Œ15; 23
 stored in this node overlaps i, the procedure returns this node.
 As an example of an unsuccessful search, suppose we wish to ﬁnd an interval
-that overlaps i D Œ11; 14 in the interval tree of Figure 14.4. We once again begin with x as the root. Since the root’s interval Œ16; 21 does not overlap i, and
-since x:left:max D 23 is greater than i:low D 11, we go left to the node containing Œ8; 9. Interval Œ8; 9 does not overlap i, and x:left:max D 10 is less than
-i:low D 11, and so we go right. (Note that no interval in the left subtree overlaps i.) Interval Œ15; 23 does not overlap i, and its left child is T:nil, so again we
+that overlaps i D Œ11; 14 in the interval tree of Figure 14.4. We once again be-
+gin with x as the root. Since the root’s interval Œ16; 21 does not overlap i, and
+since x:left:max D 23 is greater than i:low D 11, we go left to the node con-
+taining Œ8; 9. Interval Œ8; 9 does not overlap i, and x:left:max D 10 is less than
+i:low D 11, and so we go right. (Note that no interval in the left subtree over-
+laps i.) Interval Œ15; 23 does not overlap i, and its left child is T:nil, so again we
 go right, the loop terminates, and we return the sentinel T:nil.
 To see why INTERVAL-SEARCH is correct, we must understand why it sufﬁces
 to examine a single path from the root. The basic idea is that at any node x,
 if x:int does not overlap i, the search always proceeds in a safe direction: the
 search will deﬁnitely ﬁnd an overlapping interval if the tree contains one. The
 following theorem states this property more precisely.
-
-> **Theorem 14.2**
-
+Theorem 14.2
 Any execution of INTERVAL-SEARCH.T; i/ either returns a node whose interval
-overlaps i, or it returns T:nil and the tree T contains no node whose interval overlaps i.
+overlaps i, or it returns T:nil and the tree T contains no node whose interval over-
+laps i.
 
+352
+Chapter 14
+Augmenting Data Structures
 i
 (a)
 (b)
@@ -484,7 +651,8 @@ search goes left. The left subtree of x contains an interval that overlaps i (si
 or x’s left subtree contains an interval i0 such that i0:high D x:left:max. Since i does not overlap i0,
 neither does it overlap any interval i00 in x’s right subtree, since i0:low  i00:low.
 Proof
-The while loop of lines 2–5 terminates either when x D T:nil or i overlaps x:int. In the latter case, it is certainly correct to return x. Therefore, we focus
+The while loop of lines 2–5 terminates either when x D T:nil or i over-
+laps x:int. In the latter case, it is certainly correct to return x. Therefore, we focus
 on the former case, in which the while loop terminates because x D T:nil.
 We use the following invariant for the while loop of lines 2–5:
 If tree T contains an interval that overlaps i, then the subtree rooted at x
@@ -509,9 +677,12 @@ By the interval trichotomy, therefore, i 0 and i do not overlap. Thus, the left
 subtree of x contains no intervals that overlap i, so that setting x to x:right
 maintains the invariant.
 
-## 14.3 Interval trees
-
-If, on the other hand, line 4 is executed, then we will show that the contrapositive of the loop invariant holds. That is, if the subtree rooted at x:left contains no interval overlapping i, then no interval anywhere in the tree overlaps i.
+14.3
+Interval trees
+353
+If, on the other hand, line 4 is executed, then we will show that the contrapos-
+itive of the loop invariant holds. That is, if the subtree rooted at x:left con-
+tains no interval overlapping i, then no interval anywhere in the tree overlaps i.
 Since line 4 is executed, then because of the branch condition in line 3, we
 have x:left:max  i:low. Moreover, by deﬁnition of the max attribute, x’s left
 subtree must contain some interval i 0 such that
@@ -538,44 +709,50 @@ contains no interval overlapping i. The contrapositive of the loop invariant
 implies that T contains no interval that overlaps i. Hence it is correct to return
 x D T:nil.
 Thus, the INTERVAL-SEARCH procedure works correctly.
-
-## Exercises
-
+Exercises
 14.3-1
 Write pseudocode for LEFT-ROTATE that operates on nodes in an interval tree and
 updates the max attributes in O.1/ time.
 14.3-2
-Rewrite the code for INTERVAL-SEARCH so that it works properly when all intervals are open.
+Rewrite the code for INTERVAL-SEARCH so that it works properly when all inter-
+vals are open.
 14.3-3
-Describe an efﬁcient algorithm that, given an interval i, returns an interval overlapping i that has the minimum low endpoint, or T:nil if no such interval exists.
+Describe an efﬁcient algorithm that, given an interval i, returns an interval over-
+lapping i that has the minimum low endpoint, or T:nil if no such interval exists.
 
+354
+Chapter 14
+Augmenting Data Structures
 14.3-4
 Given an interval tree T and an interval i, describe how to list all intervals in T
 that overlap i in O.min.n; k lg n// time, where k is the number of intervals in the
 output list. (Hint: One simple method makes several queries, modifying the tree
 between queries. A slightly more complicated method does not modify the tree.)
 14.3-5
-Suggest modiﬁcations to the interval-tree procedures to support the new operation INTERVAL-SEARCH-EXACTLY.T; i/, where T is an interval tree and i is
+Suggest modiﬁcations to the interval-tree procedures to support the new opera-
+tion INTERVAL-SEARCH-EXACTLY.T; i/, where T is an interval tree and i is
 an interval. The operation should return a pointer to a node x in T such that
 x:int:low D i:low and x:int:high D i:high, or T:nil if T contains no such node.
 All operations, including INTERVAL-SEARCH-EXACTLY, should run in O.lg n/
 time on an n-node interval tree.
 14.3-6
 Show how to maintain a dynamic set Q of numbers that supports the operation
-MIN-GAP, which gives the magnitude of the difference of the two closest numbers in Q. For example, if Q D f1; 5; 9; 15; 18; 22g, then MIN-GAP.Q/ returns
-18  15 D 3, since 15 and 18 are the two closest numbers in Q. Make the operations INSERT, DELETE, SEARCH, and MIN-GAP as efﬁcient as possible, and
+MIN-GAP, which gives the magnitude of the difference of the two closest num-
+bers in Q. For example, if Q D f1; 5; 9; 15; 18; 22g, then MIN-GAP.Q/ returns
+18  15 D 3, since 15 and 18 are the two closest numbers in Q. Make the op-
+erations INSERT, DELETE, SEARCH, and MIN-GAP as efﬁcient as possible, and
 analyze their running times.
 14.3-7
 ?
-VLSI databases commonly represent an integrated circuit as a list of rectangles. Assume that each rectangle is rectilinearly oriented (sides parallel to the
-x- and y-axes), so that we represent a rectangle by its minimum and maximum xand y-coordinates. Give an O.n lg n/-time algorithm to decide whether or not a set
+VLSI databases commonly represent an integrated circuit as a list of rectan-
+gles. Assume that each rectangle is rectilinearly oriented (sides parallel to the
+x- and y-axes), so that we represent a rectangle by its minimum and maximum x-
+and y-coordinates. Give an O.n lg n/-time algorithm to decide whether or not a set
 of n rectangles so represented contains two rectangles that overlap. Your algorithm
 need not report all intersecting pairs, but it must report that an overlap exists if one
 rectangle entirely covers another, even if the boundary lines do not intersect. (Hint:
 Move a “sweep” line across the set of rectangles.)
-
-## Problems
-
+Problems
 14-1
 Point of maximum overlap
 Suppose that we wish to keep track of a point of maximum overlap in a set of
@@ -584,7 +761,10 @@ a. Show that there will always be a point of maximum overlap that is an endpoint
 of one of the segments.
 
 Notes for Chapter 14
-b. Design a data structure that efﬁciently supports the operations INTERVALINSERT, INTERVAL-DELETE, and FIND-POM, which returns a point of maximum overlap. (Hint: Keep a red-black tree of all the endpoints. Associate
+355
+b. Design a data structure that efﬁciently supports the operations INTERVAL-
+INSERT, INTERVAL-DELETE, and FIND-POM, which returns a point of max-
+imum overlap. (Hint: Keep a red-black tree of all the endpoints. Associate
 a value of C1 with each left endpoint, and associate a value of 1 with each
 right endpoint. Augment each node of the tree with some extra information to
 maintain the point of maximum overlap.)

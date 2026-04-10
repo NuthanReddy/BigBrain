@@ -1,38 +1,45 @@
 # 33 Computational Geometry
 
+33
 Computational Geometry
 Computational geometry is the branch of computer science that studies algorithms
-for solving geometric problems. In modern engineering and mathematics, computational geometry has applications in such diverse ﬁelds as computer graphics,
+for solving geometric problems. In modern engineering and mathematics, com-
+putational geometry has applications in such diverse ﬁelds as computer graphics,
 robotics, VLSI design, computer-aided design, molecular modeling, metallurgy,
-manufacturing, textile layout, forestry, and statistics. The input to a computationalgeometry problem is typically a description of a set of geometric objects, such as
-a set of points, a set of line segments, or the vertices of a polygon in counterclockwise order. The output is often a response to a query about the objects, such as
+manufacturing, textile layout, forestry, and statistics. The input to a computational-
+geometry problem is typically a description of a set of geometric objects, such as
+a set of points, a set of line segments, or the vertices of a polygon in counterclock-
+wise order. The output is often a response to a query about the objects, such as
 whether any of the lines intersect, or perhaps a new geometric object, such as the
 convex hull (smallest enclosing convex polygon) of the set of points.
 In this chapter, we look at a few computational-geometry algorithms in two
 dimensions, that is, in the plane.
 We represent each input object by a set of
-points fp1; p2; p3; : : :g, where each pi D .xi; yi/ and xi; yi 2 R. For example, we represent an n-vertex polygon P by a sequence hp0; p1; p2; : : : ; pn1i
+points fp1; p2; p3; : : :g, where each pi D .xi; yi/ and xi; yi 2 R. For exam-
+ple, we represent an n-vertex polygon P by a sequence hp0; p1; p2; : : : ; pn1i
 of its vertices in order of their appearance on the boundary of P . Computational
 geometry can also apply to three dimensions, and even higher-dimensional spaces,
 but such problems and their solutions can be very difﬁcult to visualize. Even in
 two dimensions, however, we can see a good sample of computational-geometry
 techniques.
-Section 33.1 shows how to answer basic questions about line segments efﬁciently and accurately: whether one segment is clockwise or counterclockwise
+Section 33.1 shows how to answer basic questions about line segments efﬁ-
+ciently and accurately: whether one segment is clockwise or counterclockwise
 from another that shares an endpoint, which way we turn when traversing two
 adjoining line segments, and whether two line segments intersect. Section 33.2
 presents a technique called “sweeping” that we use to develop an O.n lg n/-time
-algorithm for determining whether a set of n line segments contains any intersections. Section 33.3 gives two “rotational-sweep” algorithms that compute the
+algorithm for determining whether a set of n line segments contains any inter-
+sections. Section 33.3 gives two “rotational-sweep” algorithms that compute the
 convex hull (smallest enclosing convex polygon) of a set of n points: Graham’s
 scan, which runs in time O.n lg n/, and Jarvis’s march, which takes O.nh/ time,
 where h is the number of vertices of the convex hull. Finally, Section 33.4 gives
 
-## 33.1 Line-segment properties
-
+33.1
+Line-segment properties
+1015
 an O.n lg n/-time divide-and-conquer algorithm for ﬁnding the closest pair of
 points in a set of n points in the plane.
-
-## 33.1 Line-segment properties
-
+33.1
+Line-segment properties
 Several of the computational-geometry algorithms in this chapter require answers
 to questions about the properties of line segments. A convex combination of two
 distinct points p1 D .x1; y1/ and p2 D .x2; y2/ is any point p3 D .x3; y3/ such
@@ -58,16 +65,21 @@ do we make a left turn at point p1?
 3. Do line segments p1p2 and p3p4 intersect?
 There are no restrictions on the given points.
 We can answer each question in O.1/ time, which should come as no surprise
-since the input size of each question is O.1/. Moreover, our methods use only additions, subtractions, multiplications, and comparisons. We need neither division
+since the input size of each question is O.1/. Moreover, our methods use only ad-
+ditions, subtractions, multiplications, and comparisons. We need neither division
 nor trigonometric functions, both of which can be computationally expensive and
 prone to problems with round-off error. For example, the “straightforward” method
 of determining whether two segments intersect—compute the line equation of the
 form y D mx C b for each segment (m is the slope and b is the y-intercept),
 ﬁnd the point of intersection of the lines, and check whether this point is on both
 segments—uses division to ﬁnd the point of intersection. When the segments are
-nearly parallel, this method is very sensitive to the precision of the division operation on real computers. The method in this section, which avoids division, is much
+nearly parallel, this method is very sensitive to the precision of the division opera-
+tion on real computers. The method in this section, which avoids division, is much
 more accurate.
 
+1016
+Chapter 33
+Computational Geometry
 p2
 x
 y
@@ -103,11 +115,13 @@ x1y2  x2y1
 D
 p2 	 p1 :
 If p1	p2 is positive, then p1 is clockwise from p2 with respect to the origin .0; 0/;
-if this cross product is negative, then p1 is counterclockwise from p2. (See Exercise 33.1-1.) Figure 33.1(b) shows the clockwise and counterclockwise regions
+if this cross product is negative, then p1 is counterclockwise from p2. (See Exer-
+cise 33.1-1.) Figure 33.1(b) shows the clockwise and counterclockwise regions
 relative to a vector p. A boundary condition arises if the cross product is 0; in this
 case, the vectors are colinear, pointing in either the same or opposite directions.
 To determine whether a directed segment !
-p0p1 is closer to a directed segment !
+p0p1 is closer to a directed seg-
+ment !
 p0p2 in a clockwise direction or in a counterclockwise direction with respect
 to their common endpoint p0, we simply translate to use p0 as the origin. That
 is, we let p1  p0 denote the vector p0
@@ -121,8 +135,9 @@ y0
 both p1 and p2 according to the “right-hand rule” and whose magnitude is jx1y2  x2y1j. In this
 chapter, however, we ﬁnd it convenient to treat the cross product simply as the value x1y2  x2y1.
 
-## 33.1 Line-segment properties
-
+33.1
+Line-segment properties
+1017
 p0
 p1
 p2
@@ -148,7 +163,8 @@ is counterclockwise.
 Determining whether consecutive segments turn left or right
 Our next question is whether two consecutive line segments p0p1 and p1p2 turn
 left or right at point p1. Equivalently, we want a method to determine which way a
-given angle †p0p1p2 turns. Cross products allow us to answer this question without computing the angle. As Figure 33.2 shows, we simply check whether directed
+given angle †p0p1p2 turns. Cross products allow us to answer this question with-
+out computing the angle. As Figure 33.2 shows, we simply check whether directed
 segment !
 p0p2 is clockwise or counterclockwise relative to directed segment !
 p0p1.
@@ -169,36 +185,61 @@ if either (or both) of the following conditions holds:
 2. An endpoint of one segment lies on the other segment. (This condition comes
 from the boundary case.)
 
+1018
+Chapter 33
+Computational Geometry
 The following procedures implement this idea. SEGMENTS-INTERSECT returns
 TRUE if segments p1p2 and p3p4 intersect and FALSE if they do not. It calls
-the subroutines DIRECTION, which computes relative orientations using the crossproduct method above, and ON-SEGMENT, which determines whether a point
+the subroutines DIRECTION, which computes relative orientations using the cross-
+product method above, and ON-SEGMENT, which determines whether a point
 known to be colinear with a segment lies on that segment.
 SEGMENTS-INTERSECT.p1; p2; p3; p4/
+1
 d1 D DIRECTION.p3; p4; p1/
+2
 d2 D DIRECTION.p3; p4; p2/
+3
 d3 D DIRECTION.p1; p2; p3/
+4
 d4 D DIRECTION.p1; p2; p4/
+5
 if ..d1 > 0 and d2 < 0/ or .d1 < 0 and d2 > 0// and
 ..d3 > 0 and d4 < 0/ or .d3 < 0 and d4 > 0//
+6
 return TRUE
+7
 elseif d1 == 0 and ON-SEGMENT.p3; p4; p1/
+8
 return TRUE
+9
 elseif d2 == 0 and ON-SEGMENT.p3; p4; p2/
+10
 return TRUE
+11
 elseif d3 == 0 and ON-SEGMENT.p1; p2; p3/
+12
 return TRUE
+13
 elseif d4 == 0 and ON-SEGMENT.p1; p2; p4/
+14
 return TRUE
+15
 else return FALSE
 DIRECTION.pi; pj; pk/
+1
 return .pk  pi/ 	 .pj  pi/
 ON-SEGMENT.pi; pj; pk/
+1
 if min.xi; xj/  xk  max.xi; xj/ and min.yi; yj/  yk  max.yi; yj/
+2
 return TRUE
+3
 else return FALSE
-SEGMENTS-INTERSECT works as follows. Lines 1–4 compute the relative orientation di of each endpoint pi with respect to the other segment. If all the relative
+SEGMENTS-INTERSECT works as follows. Lines 1–4 compute the relative ori-
+entation di of each endpoint pi with respect to the other segment. If all the relative
 orientations are nonzero, then we can easily determine whether segments p1p2
-and p3p4 intersect, as follows. Segment p1p2 straddles the line containing segment p3p4 if directed segments !
+and p3p4 intersect, as follows. Segment p1p2 straddles the line containing seg-
+ment p3p4 if directed segments !
 p3p1 and !
 p3p2 have opposite orientations relative
 to !
@@ -207,8 +248,9 @@ the line containing p1p2 if the signs of d3 and d4 differ. If the test of line 5
 true, then the segments straddle each other, and SEGMENTS-INTERSECT returns
 TRUE. Figure 33.3(a) shows this case. Otherwise, the segments do not straddle
 
-## 33.1 Line-segment properties
-
+33.1
+Line-segment properties
+1019
 p1
 p2
 p3
@@ -246,7 +288,8 @@ differ. (b) Segment p3p4 straddles the line containing p1p2, but p1p2 does not s
 containing p3p4. The signs of the cross products .p1  p3/ 	 .p4  p3/ and .p2  p3/ 	 .p4  p3/
 are the same. (c) Point p3 is colinear with p1p2 and is between p1 and p2. (d) Point p3 is colinear
 with p1p2, but it is not between p1 and p2. The segments do not intersect.
-each other’s lines, although a boundary case may apply. If all the relative orientations are nonzero, no boundary case applies. All the tests against 0 in lines 7–13
+each other’s lines, although a boundary case may apply. If all the relative orienta-
+tions are nonzero, no boundary case applies. All the tests against 0 in lines 7–13
 then fail, and SEGMENTS-INTERSECT returns FALSE in line 15. Figure 33.3(b)
 shows this case.
 A boundary case occurs if any relative orientation dk is 0. Here, we know that pk
@@ -256,19 +299,22 @@ returns whether pk is between the endpoints of segment pipj, which will be the
 other segment when called in lines 7–13; the procedure assumes that pk is colinear
 with segment pipj. Figures 33.3(c) and (d) show cases with colinear points. In
 Figure 33.3(c), p3 is on p1p2, and so SEGMENTS-INTERSECT returns TRUE in
-line 12. No endpoints are on other segments in Figure 33.3(d), and so SEGMENTSINTERSECT returns FALSE in line 15.
+line 12. No endpoints are on other segments in Figure 33.3(d), and so SEGMENTS-
+INTERSECT returns FALSE in line 15.
 
+1020
+Chapter 33
+Computational Geometry
 Other applications of cross products
-Later sections of this chapter introduce additional uses for cross products. In Section 33.3, we shall need to sort a set of points according to their polar angles with
+Later sections of this chapter introduce additional uses for cross products. In Sec-
+tion 33.3, we shall need to sort a set of points according to their polar angles with
 respect to a given origin. As Exercise 33.1-3 asks you to show, we can use cross
 products to perform the comparisons in the sorting procedure. In Section 33.2, we
 shall use red-black trees to maintain the vertical ordering of a set of line segments.
 Rather than keeping explicit key values which we compare to each other in the
 red-black tree code, we shall compute a cross-product to determine which of two
 segments that intersect a given vertical line is above the other.
-
-## Exercises
-
+Exercises
 33.1-1
 Prove that if p1 	 p2 is positive, then vector p1 is clockwise from vector p2 with
 respect to the origin .0; 0/ and that if this cross product is negative, then p1 is
@@ -291,19 +337,23 @@ points are colinear.
 33.1-5
 A polygon is a piecewise-linear, closed curve in the plane. That is, it is a curve
 ending on itself that is formed by a sequence of straight-line segments, called the
-sides of the polygon. A point joining two consecutive sides is a vertex of the polygon. If the polygon is simple, as we shall generally assume, it does not cross itself.
+sides of the polygon. A point joining two consecutive sides is a vertex of the poly-
+gon. If the polygon is simple, as we shall generally assume, it does not cross itself.
 The set of points in the plane enclosed by a simple polygon forms the interior of
 
-## 33.2 Determining whether any pair of segments intersects
-
+33.2
+Determining whether any pair of segments intersects
+1021
 the polygon, the set of points on the polygon itself forms its boundary, and the set
 of points surrounding the polygon forms its exterior. A simple polygon is convex
 if, given any two points on its boundary or in its interior, all points on the line
 segment drawn between them are contained in the polygon’s boundary or interior.
 A vertex of a convex polygon cannot be expressed as a convex combination of any
 two distinct points on the boundary or in the interior of the polygon.
-Professor Amundsen proposes the following method to determine whether a sequence hp0; p1; : : : ; pn1i of n points forms the consecutive vertices of a convex
-polygon. Output “yes” if the set f†pipiC1piC2 W i D 0; 1; : : : ; n  1g, where subscript addition is performed modulo n, does not contain both left turns and right
+Professor Amundsen proposes the following method to determine whether a se-
+quence hp0; p1; : : : ; pn1i of n points forms the consecutive vertices of a convex
+polygon. Output “yes” if the set f†pipiC1piC2 W i D 0; 1; : : : ; n  1g, where sub-
+script addition is performed modulo n, does not contain both left turns and right
 turns; otherwise, output “no.” Show that although this method runs in linear time,
 it does not always produce the correct answer. Modify the professor’s method so
 that it always produces the correct answer in linear time.
@@ -324,12 +374,15 @@ when the ray overlaps a side of the polygon.)
 33.1-8
 Show how to compute the area of an n-vertex simple, but not necessarily convex,
 polygon in ‚.n/ time. (See Exercise 33.1-5 for deﬁnitions pertaining to polygons.)
-
-## 33.2 Determining whether any pair of segments intersects
-
+33.2
+Determining whether any pair of segments intersects
 This section presents an algorithm for determining whether any two line segments
-in a set of segments intersect. The algorithm uses a technique known as “sweeping,” which is common to many computational-geometry algorithms. Moreover, as
+in a set of segments intersect. The algorithm uses a technique known as “sweep-
+ing,” which is common to many computational-geometry algorithms. Moreover, as
 
+1022
+Chapter 33
+Computational Geometry
 the exercises at the end of this section show, this algorithm, or simple variations of
 it, can help solve other computational-geometry problems.
 The algorithm runs in O.n lg n/ time, where n is the number of segments we are
@@ -339,7 +392,8 @@ all the intersections. (By Exercise 33.2-1, it takes .n2/ time in the worst cas
 In sweeping, an imaginary vertical sweep line passes through the given set of
 geometric objects, usually from left to right. We treat the spatial dimension that
 the sweep line moves across, in this case the x-dimension, as a dimension of
-time. Sweeping provides a method for ordering geometric objects, usually by placing them into a dynamic data structure, and for taking advantage of relationships
+time. Sweeping provides a method for ordering geometric objects, usually by plac-
+ing them into a dynamic data structure, and for taking advantage of relationships
 among them. The line-segment-intersection algorithm in this section considers all
 the line-segment endpoints in left-to-right order and checks for an intersection each
 time it encounters an endpoint.
@@ -355,7 +409,8 @@ their correctness.
 Ordering segments
 Because we assume that there are no vertical segments, we know that any input
 segment intersecting a given vertical sweep line intersects it at a single point. Thus,
-we can order the segments that intersect a vertical sweep line according to the ycoordinates of the points of intersection.
+we can order the segments that intersect a vertical sweep line according to the y-
+coordinates of the points of intersection.
 To be more precise, consider two segments s1 and s2. We say that these segments
 are comparable at x if the vertical sweep line with x-coordinate x intersects both of
 them. We say that s1 is above s2 at x, written s1 <x s2, if s1 and s2 are comparable
@@ -368,8 +423,9 @@ segments that intersect the sweep line at x. That is, the relation is transitive
 if segments s1 and s2 each intersect the sweep line at x, then either s1 <x s2
 or s2 <x s1, or both (if s1 and s2 intersect at the sweep line). (The relation <x is
 
-## 33.2 Determining whether any pair of segments intersects
-
+33.2
+Determining whether any pair of segments intersects
+1023
 r
 t
 u
@@ -397,7 +453,8 @@ also reﬂexive, but neither symmetric nor antisymmetric.) The total preorder ma
 differ for differing values of x, however, as segments enter and leave the ordering.
 A segment enters the ordering when its left endpoint is encountered by the sweep,
 and it leaves the ordering when its right endpoint is encountered.
-What happens when the sweep line passes through the intersection of two segments? As Figure 33.4(b) shows, the segments reverse their positions in the total
+What happens when the sweep line passes through the intersection of two seg-
+ments? As Figure 33.4(b) shows, the segments reverse their positions in the total
 preorder. Sweep lines  and w are to the left and right, respectively, of the point
 of intersection of segments e and f , and we have e < f and f <w e. Note
 that because we assume that no three segments intersect at the same point, there
@@ -414,14 +471,19 @@ progresses from left to right, whenever the sweep line reaches the x-coordinate
 of an event point, the sweep halts, processes the event point, and then resumes.
 Changes to the sweep-line status occur only at event points.
 For some algorithms (the algorithm asked for in Exercise 33.2-7, for example),
-the event-point schedule develops dynamically as the algorithm progresses. The algorithm at hand, however, determines all the event points before the sweep, based
+the event-point schedule develops dynamically as the algorithm progresses. The al-
+gorithm at hand, however, determines all the event points before the sweep, based
 
+1024
+Chapter 33
+Computational Geometry
 solely on simple properties of the input data. In particular, each segment endpoint
 is an event point. We sort the segment endpoints by increasing x-coordinate and
 proceed from left to right. (If two or more endpoints are covertical, i.e., they have
 the same x-coordinate, we break the tie by putting all the covertical left endpoints
 before the covertical right endpoints. Within a set of covertical left endpoints, we
-put those with lower y-coordinates ﬁrst, and we do the same within a set of covertical right endpoints.) When we encounter a segment’s left endpoint, we insert the
+put those with lower y-coordinates ﬁrst, and we do the same within a set of cover-
+tical right endpoints.) When we encounter a segment’s left endpoint, we insert the
 segment into the sweep-line status, and we delete the segment from the sweep-line
 status upon encountering its right endpoint. Whenever two segments ﬁrst become
 consecutive in the total preorder, we check whether they intersect.
@@ -441,32 +503,46 @@ total preorder is given by T . In this case, the two segments may appear in eith
 order in T .
 If the input contains n segments, we can perform each of the operations INSERT,
 DELETE, ABOVE, and BELOW in O.lg n/ time using red-black trees. Recall that
-the red-black-tree operations in Chapter 13 involve comparing keys. We can replace the key comparisons by comparisons that use cross products to determine the
+the red-black-tree operations in Chapter 13 involve comparing keys. We can re-
+place the key comparisons by comparisons that use cross products to determine the
 relative ordering of two segments (see Exercise 33.2-2).
 Segment-intersection pseudocode
 The following algorithm takes as input a set S of n line segments, returning the
 boolean value TRUE if any pair of segments in S intersects, and FALSE otherwise.
 A red-black tree maintains the total preorder T .
 
-## 33.2 Determining whether any pair of segments intersects
-
+33.2
+Determining whether any pair of segments intersects
+1025
 ANY-SEGMENTS-INTERSECT.S/
+1
 T D ;
+2
 sort the endpoints of the segments in S from left to right,
 breaking ties by putting left endpoints before right endpoints
 and breaking further ties by putting points with lower
 y-coordinates ﬁrst
+3
 for each point p in the sorted list of endpoints
+4
 if p is the left endpoint of a segment s
+5
 INSERT.T; s/
+6
 if (ABOVE.T; s/ exists and intersects s)
 or (BELOW.T; s/ exists and intersects s)
+7
 return TRUE
+8
 if p is the right endpoint of a segment s
+9
 if both ABOVE.T; s/ and BELOW.T; s/ exist
 and ABOVE.T; s/ intersects BELOW.T; s/
+10
 return TRUE
+11
 DELETE.T; s/
+12
 return FALSE
 Figure 33.5 illustrates how the algorithm works. Line 1 initializes the total preorder
 to be empty. Line 2 determines the event-point schedule by sorting the 2n segment
@@ -489,6 +565,9 @@ argument, which follows, will make it clear why it sufﬁces to check the segmen
 surrounding s. Finally, if we never ﬁnd any intersections after having processed
 all 2n event points, line 12 returns FALSE.
 
+1026
+Chapter 33
+Computational Geometry
 a
 a
 b
@@ -521,11 +600,13 @@ point. The rightmost sweep line occurs when processing the right endpoint of seg
 segments d and b surround c and intersect each other, the procedure returns TRUE.
 Correctness
 To show that ANY-SEGMENTS-INTERSECT is correct, we will prove that the call
-ANY-SEGMENTS-INTERSECT.S/ returns TRUE if and only if there is an intersection among the segments in S.
+ANY-SEGMENTS-INTERSECT.S/ returns TRUE if and only if there is an intersec-
+tion among the segments in S.
 It is easy to see that ANY-SEGMENTS-INTERSECT returns TRUE (on lines 7
 and 10) only if it ﬁnds an intersection between two of the input segments. Hence,
 if it returns TRUE, there is an intersection.
-We also need to show the converse: that if there is an intersection, then ANYSEGMENTS-INTERSECT returns TRUE. Let us suppose that there is at least one
+We also need to show the converse: that if there is an intersection, then ANY-
+SEGMENTS-INTERSECT returns TRUE. Let us suppose that there is at least one
 intersection. Let p be the leftmost intersection point, breaking ties by choosing the
 point with the lowest y-coordinate, and let a and b be the segments that intersect
 at p. Since no intersections occur to the left of p, the order given by T is correct at
@@ -537,8 +618,9 @@ intersects both a and b at point p. That is, we may have a <w c and c <w b for a
 the left of p for which a <w b. Exercise 33.2-8 asks you to show that ANY-SEGMENTS-INTERSECT
 is correct even if three segments do intersect at the same point.
 
-## 33.2 Determining whether any pair of segments intersects
-
+33.2
+Determining whether any pair of segments intersects
+1027
 is the event point at which a and b become consecutive in the total preorder. If p
 is on sweep line ´, then q D p. If p is not on sweep line ´, then q is to the left
 of p. In either case, the order given by T is correct just before encountering q.
@@ -546,7 +628,8 @@ of p. In either case, the order given by T is correct just before encountering q
 event points. Because p is the lowest of the leftmost intersection points, even if p
 is on sweep line ´ and some other intersection point p0 is on ´, event point q D p
 is processed before the other intersection p0 can interfere with the total preorder T .
-Moreover, even if p is the left endpoint of one segment, say a, and the right endpoint of the other segment, say b, because left endpoint events occur before right
+Moreover, even if p is the left endpoint of one segment, say a, and the right end-
+point of the other segment, say b, because left endpoint events occur before right
 endpoint events, segment b is in T upon ﬁrst encountering segment a.) Either event
 point q is processed by ANY-SEGMENTS-INTERSECT or it is not processed.
 If q is processed by ANY-SEGMENTS-INTERSECT, only two possible actions
@@ -558,8 +641,10 @@ preorder is deleted, making a and b become consecutive. Lines 8–11 detect this
 case.
 In either case, we ﬁnd the intersection p and ANY-SEGMENTS-INTERSECT returns
 TRUE.
-If event point q is not processed by ANY-SEGMENTS-INTERSECT, the procedure must have returned before processing all event points. This situation could
-have occurred only if ANY-SEGMENTS-INTERSECT had already found an intersection and returned TRUE.
+If event point q is not processed by ANY-SEGMENTS-INTERSECT, the proce-
+dure must have returned before processing all event points. This situation could
+have occurred only if ANY-SEGMENTS-INTERSECT had already found an inter-
+section and returned TRUE.
 Thus, if there is an intersection, ANY-SEGMENTS-INTERSECT returns TRUE.
 As we have already seen, if ANY-SEGMENTS-INTERSECT returns TRUE, there is
 an intersection. Therefore, ANY-SEGMENTS-INTERSECT always returns a correct
@@ -573,23 +658,29 @@ O.lg n/ time, since each red-black-tree operation takes O.lg n/ time and, using 
 method of Section 33.1, each intersection test takes O.1/ time. The total time is
 thus O.n lg n/.
 
-## Exercises
-
+1028
+Chapter 33
+Computational Geometry
+Exercises
 33.2-1
 Show that a set of n line segments may contain ‚.n2/ intersections.
 33.2-2
 Given two segments a and b that are comparable at x, show how to determine
 in O.1/ time which of a <x b or b <x a holds. Assume that neither segment
 is vertical. (Hint: If a and b do not intersect, you can just use cross products.
-If a and b intersect—which you can of course determine using only cross products—you can still use only addition, subtraction, and multiplication, avoiding
+If a and b intersect—which you can of course determine using only cross prod-
+ucts—you can still use only addition, subtraction, and multiplication, avoiding
 division. Of course, in the application of the <x relation used here, if a and b
 intersect, we can just stop and declare that we have found an intersection.)
 33.2-3
 Professor Mason suggests that we modify ANY-SEGMENTS-INTERSECT so that
-instead of returning upon ﬁnding an intersection, it prints the segments that intersect and continues on to the next iteration of the for loop. The professor calls the
+instead of returning upon ﬁnding an intersection, it prints the segments that inter-
+sect and continues on to the next iteration of the for loop. The professor calls the
 resulting procedure PRINT-INTERSECTING-SEGMENTS and claims that it prints
-all intersections, from left to right, as they occur in the set of line segments. Professor Dixon disagrees, claiming that Professor Mason’s idea is incorrect. Which
-professor is right? Will PRINT-INTERSECTING-SEGMENTS always ﬁnd the leftmost intersection ﬁrst? Will it always ﬁnd all the intersections?
+all intersections, from left to right, as they occur in the set of line segments. Pro-
+fessor Dixon disagrees, claiming that Professor Mason’s idea is incorrect. Which
+professor is right? Will PRINT-INTERSECTING-SEGMENTS always ﬁnd the left-
+most intersection ﬁrst? Will it always ﬁnd all the intersections?
 33.2-4
 Give an O.n lg n/-time algorithm to determine whether an n-vertex polygon is
 simple.
@@ -598,23 +689,25 @@ Give an O.n lg n/-time algorithm to determine whether two simple polygons with
 a total of n vertices intersect.
 33.2-6
 A disk consists of a circle plus its interior and is represented by its center point and
-radius. Two disks intersect if they have any point in common. Give an O.n lg n/time algorithm to determine whether any two disks in a set of n intersect.
+radius. Two disks intersect if they have any point in common. Give an O.n lg n/-
+time algorithm to determine whether any two disks in a set of n intersect.
 33.2-7
 Given a set of n line segments containing a total of k intersections, show how to
 output all k intersections in O..n C k/ lg n/ time.
 
-## 33.3 Finding the convex hull
-
+33.3
+Finding the convex hull
+1029
 33.2-8
 Argue that ANY-SEGMENTS-INTERSECT works correctly even if three or more
 segments intersect at the same point.
 33.2-9
-Show that ANY-SEGMENTS-INTERSECT works correctly in the presence of vertical segments if we treat the bottom endpoint of a vertical segment as if it were a
+Show that ANY-SEGMENTS-INTERSECT works correctly in the presence of verti-
+cal segments if we treat the bottom endpoint of a vertical segment as if it were a
 left endpoint and the top endpoint as if it were a right endpoint. How does your
 answer to Exercise 33.2-2 change if we allow vertical segments?
-
-## 33.3 Finding the convex hull
-
+33.3
+Finding the convex hull
 The convex hull of a set Q of points, denoted by CH.Q/, is the smallest convex
 polygon P for which each point in Q is either on the boundary of P or in its
 interior. (See Exercise 33.1-5 for a precise deﬁnition of a convex polygon.) We
@@ -644,6 +737,9 @@ p12
 Figure 33.6
 A set of points Q D fp0; p1; : : : ; p12g with its convex hull CH.Q/ in gray.
 
+1030
+Chapter 33
+Computational Geometry
 point in Q. Both algorithms exploit this property, deciding which vertices in Q to
 keep as vertices of the convex hull and which vertices in Q to reject.
 We can compute convex hulls in O.n lg n/ time by any one of several methods.
@@ -672,7 +768,8 @@ do the same for the lower chain. This method is asymptotically the fastest: if
 the convex hull contains h vertices, it runs in only O.n lg h/ time.
 Computing the convex hull of a set of points is an interesting problem in its own
 right. Moreover, algorithms for some other computational-geometry problems start
-by computing a convex hull. Consider, for example, the two-dimensional farthestpair problem: we are given a set of n points in the plane and wish to ﬁnd the
+by computing a convex hull. Consider, for example, the two-dimensional farthest-
+pair problem: we are given a set of n points in the plane and wish to ﬁnd the
 two points whose distance from each other is maximum. As Exercise 33.3-3 asks
 you to prove, these two points must be vertices of the convex hull. Although we
 won’t prove it here, we can ﬁnd the farthest pair of vertices of an n-vertex convex
@@ -681,10 +778,12 @@ in O.n lg n/ time and then ﬁnding the farthest pair of the resulting convex-po
 vertices, we can ﬁnd the farthest pair of points in any set of n points in O.n lg n/
 time.
 Graham’s scan
-Graham’s scan solves the convex-hull problem by maintaining a stack S of candidate points. It pushes each point of the input set Q onto the stack one time,
+Graham’s scan solves the convex-hull problem by maintaining a stack S of can-
+didate points. It pushes each point of the input set Q onto the stack one time,
 
-## 33.3 Finding the convex hull
-
+33.3
+Finding the convex hull
+1031
 and it eventually pops from the stack each point that is not a vertex of CH.Q/.
 When the algorithm terminates, stack S contains exactly the vertices of CH.Q/, in
 counterclockwise order of their appearance on the boundary.
@@ -695,21 +794,32 @@ top of stack S without changing S. As we shall prove in a moment, the stack S
 returned by GRAHAM-SCAN contains, from bottom to top, exactly the vertices
 of CH.Q/ in counterclockwise order.
 GRAHAM-SCAN.Q/
+1
 let p0 be the point in Q with the minimum y-coordinate,
 or the leftmost such point in case of a tie
+2
 let hp1; p2; : : : ; pmi be the remaining points in Q,
 sorted by polar angle in counterclockwise order around p0
 (if more than one point has the same angle, remove all but
 the one that is farthest from p0)
+3
 let S be an empty stack
+4
 PUSH.p0; S/
+5
 PUSH.p1; S/
+6
 PUSH.p2; S/
+7
 for i D 3 to m
+8
 while the angle formed by points NEXT-TO-TOP.S/, TOP.S/,
 and pi makes a nonleft turn
+9
 POP.S/
+10
 PUSH.pi; S/
+11
 return S
 Figure 33.7 illustrates the progress of GRAHAM-SCAN. Line 1 chooses point p0
 as the point with the lowest y-coordinate, picking the leftmost such point in case
@@ -725,6 +835,9 @@ half-open interval Œ0; /. Since the points are sorted according to polar angle
 they are sorted in counterclockwise order relative to p0. We designate this sorted
 sequence of points by hp1; p2; : : : ; pmi. Note that points p1 and pm are vertices
 
+1032
+Chapter 33
+Computational Geometry
 p12
 p11
 p10
@@ -818,8 +931,9 @@ turns, which cause points to be popped from the stack. In part (h), for example,
 angle †p7p8p9 causes p8 to be popped, and then the right turn at angle †p6p7p9 causes p7 to be
 popped.
 
-## 33.3 Finding the convex hull
-
+33.3
+Finding the convex hull
+1033
 p12
 p11
 p10
@@ -908,13 +1022,17 @@ Figure 33.7, continued
 (l) The convex hull returned by the procedure, which matches that of
 Figure 33.6.
 
+1034
+Chapter 33
+Computational Geometry
 of CH.Q/ (see Exercise 33.3-1). Figure 33.7(a) shows the points of Figure 33.6
 sequentially numbered in order of increasing polar angle relative to p0.
 The remainder of the procedure uses the stack S. Lines 3–6 initialize the stack
 to contain, from bottom to top, the ﬁrst three points p0, p1, and p2. Figure 33.7(a)
 shows the initial stack S. The for loop of lines 7–10 iterates once for each point
 in the subsequence hp3; p4; : : : ; pmi. We shall see that after processing point pi,
-stack S contains, from bottom to top, the vertices of CH.fp0; p1; : : : ; pig/ in counterclockwise order. The while loop of lines 8–9 removes points from the stack if
+stack S contains, from bottom to top, the vertices of CH.fp0; p1; : : : ; pig/ in coun-
+terclockwise order. The while loop of lines 8–9 removes points from the stack if
 we ﬁnd them not to be vertices of the convex hull. When we traverse the convex
 hull counterclockwise, we should make a left turn at each vertex. Thus, each time
 the while loop ﬁnds a vertex at which we make a nonleft turn, we pop the vertex
@@ -927,10 +1045,9 @@ Figures 33.7(b)–(k) show the state of the stack S after each iteration of the 
 loop. Finally, GRAHAM-SCAN returns the stack S in line 11. Figure 33.7(l) shows
 the corresponding convex hull.
 The following theorem formally proves the correctness of GRAHAM-SCAN.
-
-> **Theorem 33.1 (Correctness of Graham’s scan)**
-
-If GRAHAM-SCAN executes on a set Q of points, where jQj  3, then at termination, the stack S consists of, from bottom to top, exactly the vertices of CH.Q/ in
+Theorem 33.1 (Correctness of Graham’s scan)
+If GRAHAM-SCAN executes on a set Q of points, where jQj  3, then at termina-
+tion, the stack S consists of, from bottom to top, exactly the vertices of CH.Q/ in
 counterclockwise order.
 Proof
 After line 2, we have the sequence of points hp1; p2; : : : ; pmi. Let us
@@ -948,8 +1065,9 @@ order.
 Initialization: The invariant holds the ﬁrst time we execute line 7, since at that
 time, stack S consists of exactly the vertices of Q2 D Qi1, and this set of three
 
-## 33.3 Finding the convex hull
-
+33.3
+Finding the convex hull
+1035
 p0
 p1
 p2
@@ -994,6 +1112,9 @@ the point just below pt on stack S at the time pt was popped (pr might be pj).
 The angle †prptpi makes a nonleft turn, and the polar angle of pt relative
 to p0 is greater than the polar angle of pr. As Figure 33.8(b) shows, pt must
 
+1036
+Chapter 33
+Computational Geometry
 be either in the interior of the triangle formed by p0, pr, and pi or on a side of
 this triangle (but it is not a vertex of the triangle). Clearly, since pt is within a
 triangle formed by three other points of Qi, it cannot be a vertex of CH.Qi/.
@@ -1031,8 +1152,9 @@ line 8 takes O.1/ time, each call of POP takes O.1/ time, and m  n  1, the tot
 time taken by the while loop is O.n/. Thus, the running time of GRAHAM-SCAN
 is O.n lg n/.
 
-## 33.3 Finding the convex hull
-
+33.3
+Finding the convex hull
+1037
 p4
 p2
 p0
@@ -1065,6 +1187,9 @@ vertices of CH.Q/. We start with p0. As Figure 33.9 shows, the next vertex p1
 in the convex hull has the smallest polar angle with respect to p0. (In case of ties,
 we choose the point farthest from p0.) Similarly, p2 has the smallest polar angle
 
+1038
+Chapter 33
+Computational Geometry
 with respect to p1, and so on. When we reach the highest vertex, say pk (breaking
 ties by choosing the farthest such vertex), we have constructed, as Figure 33.9
 shows, the right chain of CH.Q/. To construct the left chain, we start at pk and
@@ -1072,23 +1197,24 @@ choose pkC1 as the point with the smallest polar angle with respect to pk, but f
 the negative x-axis. We continue on, forming the left chain by taking polar angles
 from the negative x-axis, until we come back to our original vertex p0.
 We could implement Jarvis’s march in one conceptual sweep around the convex
-hull, that is, without separately constructing the right and left chains. Such implementations typically keep track of the angle of the last convex-hull side chosen and
+hull, that is, without separately constructing the right and left chains. Such imple-
+mentations typically keep track of the angle of the last convex-hull side chosen and
 require the sequence of angles of hull sides to be strictly increasing (in the range
 of 0 to 2 radians). The advantage of constructing separate chains is that we need
 not explicitly compute angles; the techniques of Section 33.1 sufﬁce to compare
 angles.
 If implemented properly, Jarvis’s march has a running time of O.nh/. For each
 of the h vertices of CH.Q/, we ﬁnd the vertex with the minimum polar angle. Each
-comparison between polar angles takes O.1/ time, using the techniques of Section 33.1. As Section 9.1 shows, we can compute the minimum of n values in O.n/
+comparison between polar angles takes O.1/ time, using the techniques of Sec-
+tion 33.1. As Section 9.1 shows, we can compute the minimum of n values in O.n/
 time if each comparison takes O.1/ time. Thus, Jarvis’s march takes O.nh/ time.
-
-## Exercises
-
+Exercises
 33.3-1
 Prove that in the procedure GRAHAM-SCAN, points p1 and pm must be vertices
 of CH.Q/.
 33.3-2
-Consider a model of computation that supports addition, comparison, and multiplication and for which there is a lower bound of .n lg n/ to sort n numbers. Prove
+Consider a model of computation that supports addition, comparison, and multipli-
+cation and for which there is a lower bound of .n lg n/ to sort n numbers. Prove
 that .n lg n/ is a lower bound for computing, in order, the vertices of the convex
 hull of a set of n points in such a model.
 33.3-3
@@ -1101,8 +1227,9 @@ of P . As Figure 33.10 illustrates, a polygon P is star-shaped if there exists a
 point p in the interior of P that is in the shadow of every point on the boundary
 of P . The set of all such points p is called the kernel of P . Given an n-vertex,
 
-## 33.4 Finding the closest pair of points
-
+33.4
+Finding the closest pair of points
+1039
 p
 (a)
 (b)
@@ -1125,9 +1252,8 @@ a total of O.n2/ time.
 ?
 Show how to implement the incremental method for computing the convex hull
 of n points so that it runs in O.n lg n/ time.
-
-## 33.4 Finding the closest pair of points
-
+33.4
+Finding the closest pair of points
 We now consider the problem of ﬁnding the closest pair of points in a set Q of
 n  2 points. “Closest” refers to the usual euclidean distance: the distance between
 points p1 D .x1; y1/ and p2 D .x2; y2/ is
@@ -1140,10 +1266,14 @@ to detect potential collisions.
 A brute-force closest-pair algorithm simply looks at all the
 
 n
+2
 
 D ‚.n2/ pairs
 of points. In this section, we shall describe a divide-and-conquer algorithm for
 
+1040
+Chapter 33
+Computational Geometry
 this problem, whose running time is described by the familiar recurrence T .n/ D
 2T .n=2/ C O.n/. Thus, this algorithm uses only O.n lg n/ time.
 The divide-and-conquer algorithm
@@ -1162,6 +1292,7 @@ jP j  3. If so, the invocation simply performs the brute-force method described
 above: try all
 
 jP j
+2
 
 pairs of points and return the closest pair. If jP j > 3, the
 recursive invocation carries out the divide-and-conquer paradigm as follows.
@@ -1186,8 +1317,9 @@ of line l. Thus, as Figure 33.11(a) shows, they both must reside in the 2ı-wide
 vertical strip centered at line l. To ﬁnd such a pair, if one exists, we do the
 following:
 
-## 33.4 Finding the closest pair of points
-
+33.4
+Finding the closest pair of points
+1041
 1. Create an array Y 0, which is the array Y with all points not in the 2ı-wide
 vertical strip removed. The array Y 0 is sorted by y-coordinate, just as Y is.
 2. For each point p in the array Y 0, try to ﬁnd points in Y 0 that are within ı
@@ -1227,6 +1359,9 @@ Having shown that at most 8 points of P can reside within the rectangle, we
 can easily see why we need to check only the 7 points following each point in the
 array Y 0. Still assuming that the closest pair is pL and pR, let us assume without
 
+1042
+Chapter 33
+Computational Geometry
 l
 pL
 pR
@@ -1240,11 +1375,11 @@ PL
 (b)
 l
 coincident points,
-one in PL,
-one in PR
+  one in PL,
+  one in PR
 coincident points,
-one in PL,
-one in PR
+  one in PL,
+  one in PR
 δ
 δ
 δ
@@ -1272,17 +1407,26 @@ array Y , sorted by y-coordinate. Having partitioned P into PL and PR, it needs 
 form the arrays YL and YR, which are sorted by y-coordinate, in linear time. We
 can view the method as the opposite of the MERGE procedure from merge sort in
 
-## 33.4 Finding the closest pair of points
-
+33.4
+Finding the closest pair of points
+1043
 Section 2.3.1: we are splitting a sorted array into two sorted arrays. The following
 pseudocode gives the idea.
+1
 let YLŒ1 : : Y:length and YRŒ1 : : Y:length be new arrays
+2
 YL:length D YR:length D 0
+3
 for i D 1 to Y:length
+4
 if Y Œi 2 PL
+5
 YL:length D YL:length C 1
+6
 YLŒYL:length D Y Œi
+7
 else YR:length D YR:length C 1
+8
 YRŒYR:length D Y Œi
 We simply examine the points in array Y in order. If a point Y Œi is in PL, we
 append it to the end of array YL; otherwise, we append it to the end of array YR.
@@ -1302,9 +1446,7 @@ if n > 3 ;
 O.1/
 if n  3 :
 Thus, T .n/ D O.n lg n/ and T 0.n/ D O.n lg n/.
-
-## Exercises
-
+Exercises
 33.4-1
 Professor Williams comes up with a scheme that allows the closest-pair algorithm
 to check only 5 points following each point in array Y 0. The idea is always to place
@@ -1312,11 +1454,16 @@ points on line l into set PL. Then, there cannot be pairs of coincident points o
 line l with one point in PL and one in PR. Thus, at most 6 points can reside in
 the ı 	 2ı rectangle. What is the ﬂaw in the professor’s scheme?
 33.4-2
-Show that it actually sufﬁces to check only the points in the 5 array positions following each point in the array Y 0.
+Show that it actually sufﬁces to check only the points in the 5 array positions fol-
+lowing each point in the array Y 0.
 
+1044
+Chapter 33
+Computational Geometry
 33.4-3
 We can deﬁne the distance between two points in ways other than euclidean. In
-the plane, the Lm-distance between points p1 and p2 is given by the expression .jx1  x2jm C jy1  y2jm/
+the plane, the Lm-distance between points p1 and p2 is given by the expres-
+sion .jx1  x2jm C jy1  y2jm/
 1=m. Euclidean distance, therefore, is L2-distance.
 Modify the closest-pair algorithm to use the L1-distance, which is also known as
 the Manhattan distance.
@@ -1333,9 +1480,7 @@ remains O.n lg n/.
 Suggest a change to the closest-pair algorithm that avoids presorting the Y array
 but leaves the running time as O.n lg n/. (Hint: Merge sorted arrays YL and YR to
 form the sorted array Y .)
-
-## Problems
-
+Problems
 33-1
 Convex layers
 Given a set Q of points in the plane, we deﬁne the convex layers of Q inductively.
@@ -1349,6 +1494,7 @@ points with any model of computation that requires .n lg n/ time to sort n real
 numbers.
 
 Problems for Chapter 33
+1045
 33-2
 Maximal layers
 Let Q be a set of n points in the plane.
@@ -1379,8 +1525,10 @@ y-coordinate? Suggest a way to resolve such problems.
 Ghostbusters and ghosts
 A group of n Ghostbusters is battling n ghosts. Each Ghostbuster carries a proton
 pack, which shoots a stream at a ghost, eradicating it. A stream goes in a straight
-line and terminates when it hits the ghost. The Ghostbusters decide upon the following strategy. They will pair off with the ghosts, forming n Ghostbuster-ghost
-pairs, and then simultaneously each Ghostbuster will shoot a stream at his chosen ghost. As we all know, it is very dangerous to let streams cross, and so the
+line and terminates when it hits the ghost. The Ghostbusters decide upon the fol-
+lowing strategy. They will pair off with the ghosts, forming n Ghostbuster-ghost
+pairs, and then simultaneously each Ghostbuster will shoot a stream at his cho-
+sen ghost. As we all know, it is very dangerous to let streams cross, and so the
 Ghostbusters must choose pairings for which no streams will cross.
 Assume that the position of each Ghostbuster and each ghost is a ﬁxed point in
 the plane and that no three positions are colinear.
@@ -1388,6 +1536,9 @@ a. Argue that there exists a line passing through one Ghostbuster and one ghost
 such that the number of Ghostbusters on one side of the line equals the number
 of ghosts on the same side. Describe how to ﬁnd such a line in O.n lg n/ time.
 
+1046
+Chapter 33
+Computational Geometry
 b. Give an O.n2 lg n/-time algorithm to pair Ghostbusters with ghosts in such a
 way that no streams cross.
 33-4
@@ -1428,11 +1579,13 @@ Recursively ﬁnd the convex hulls of the ﬁrst n=2 points and the second n=2
 points, and then combine the results.)
 
 Notes for Chapter 33
+1047
 Chapter notes
 This chapter barely scratches the surface of computational-geometry algorithms
 and techniques. Books on computational geometry include those by Preparata and
 Shamos [282], Edelsbrunner [99], and O’Rourke [269].
-Although geometry has been studied since antiquity, the development of algorithms for geometric problems is relatively new. Preparata and Shamos note that
+Although geometry has been studied since antiquity, the development of algo-
+rithms for geometric problems is relatively new. Preparata and Shamos note that
 the earliest notion of the complexity of a problem was given by E. Lemoine in 1902.
 He was studying euclidean constructions—those using a compass and a ruler—and
 devised a set of ﬁve primitives: placing one leg of the compass on a given point,
@@ -1440,9 +1593,13 @@ placing one leg of the compass on a given line, drawing a circle, passing the ru
 edge through a given point, and drawing a line. Lemoine was interested in the
 number of primitives needed to effect a given construction; he called this amount
 the “simplicity” of the construction.
-The algorithm of Section 33.2, which determines whether any segments intersect, is due to Shamos and Hoey [313].
-The original version of Graham’s scan is given by Graham [150]. The packagewrapping algorithm is due to Jarvis [189]. Using a decision-tree model of computation, Yao [359] proved a worst-case lower bound of .n lg n/ for the running
-time of any convex-hull algorithm. When the number of vertices h of the convex hull is taken into account, the prune-and-search algorithm of Kirkpatrick and
+The algorithm of Section 33.2, which determines whether any segments inter-
+sect, is due to Shamos and Hoey [313].
+The original version of Graham’s scan is given by Graham [150]. The package-
+wrapping algorithm is due to Jarvis [189]. Using a decision-tree model of com-
+putation, Yao [359] proved a worst-case lower bound of .n lg n/ for the running
+time of any convex-hull algorithm. When the number of vertices h of the con-
+vex hull is taken into account, the prune-and-search algorithm of Kirkpatrick and
 Seidel [206], which takes O.n lg h/ time, is asymptotically optimal.
 The O.n lg n/-time divide-and-conquer algorithm for ﬁnding the closest pair of
 points is by Shamos and appears in Preparata and Shamos [282]. Preparata and

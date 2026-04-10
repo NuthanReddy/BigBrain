@@ -1,5 +1,6 @@
 # 9 Medians and Order Statistics
 
+9
 Medians and Order Statistics
 The ith order statistic of a set of n elements is the ith smallest element. For
 example, the minimum of a set of elements is the ﬁrst order statistic (i D 1),
@@ -11,35 +12,48 @@ i D n=2C1. Thus, regardless of the parity of n, medians occur at i D b.n C 1/=2c
 this text, however, we consistently use the phrase “the median” to refer to the lower
 median.
 This chapter addresses the problem of selecting the ith order statistic from a
-set of n distinct numbers. We assume for convenience that the set contains distinct numbers, although virtually everything that we do extends to the situation in
+set of n distinct numbers. We assume for convenience that the set contains dis-
+tinct numbers, although virtually everything that we do extends to the situation in
 which a set contains repeated values. We formally specify the selection problem
 as follows:
 Input: A set A of n (distinct) numbers and an integer i, with 1  i  n.
 Output: The element x 2 A that is larger than exactly i  1 other elements of A.
-We can solve the selection problem in O.n lg n/ time, since we can sort the numbers using heapsort or merge sort and then simply index the ith element in the
+We can solve the selection problem in O.n lg n/ time, since we can sort the num-
+bers using heapsort or merge sort and then simply index the ith element in the
 output array. This chapter presents faster algorithms.
-In Section 9.1, we examine the problem of selecting the minimum and maximum of a set of elements. More interesting is the general selection problem, which
+In Section 9.1, we examine the problem of selecting the minimum and maxi-
+mum of a set of elements. More interesting is the general selection problem, which
 we investigate in the subsequent two sections. Section 9.2 analyzes a practical
-randomized algorithm that achieves an O.n/ expected running time, assuming distinct elements. Section 9.3 contains an algorithm of more theoretical interest that
+randomized algorithm that achieves an O.n/ expected running time, assuming dis-
+tinct elements. Section 9.3 contains an algorithm of more theoretical interest that
 achieves the O.n/ running time in the worst case.
 
-## 9.1 Minimum and maximum
-
+214
+Chapter 9
+Medians and Order Statistics
+9.1
+Minimum and maximum
 How many comparisons are necessary to determine the minimum of a set of n
 elements? We can easily obtain an upper bound of n  1 comparisons: examine
 each element of the set in turn and keep track of the smallest element seen so
 far. In the following procedure, we assume that the set resides in array A, where
 A:length D n.
 MINIMUM.A/
+1
 min D AŒ1
+2
 for i D 2 to A:length
+3
 if min > AŒi
+4
 min D AŒi
+5
 return min
 We can, of course, ﬁnd the maximum with n  1 comparisons as well.
 Is this the best we can do? Yes, since we can obtain a lower bound of n  1
 comparisons for the problem of determining the minimum. Think of any algorithm
-that determines the minimum as a tournament among the elements. Each comparison is a match in the tournament in which the smaller of the two elements wins.
+that determines the minimum as a tournament among the elements. Each compar-
+ison is a match in the tournament in which the smaller of the two elements wins.
 Observing that every element except the winner must lose at least one match, we
 conclude that n  1 comparisons are necessary to determine the minimum. Hence,
 the algorithm MINIMUM is optimal with respect to the number of comparisons
@@ -59,8 +73,9 @@ comparisons. We do so by maintaining both the minimum and maximum elements
 seen thus far. Rather than processing each element of the input by comparing it
 against the current minimum and maximum, at a cost of 2 comparisons per element,
 
-## 9.2 Selection in expected linear time
-
+9.2
+Selection in expected linear time
+215
 we process elements in pairs. We compare pairs of elements from the input ﬁrst
 with each other, and then we compare the smaller with the current minimum and
 the larger to the current maximum, at a cost of 3 comparisons for every 2 elements.
@@ -74,9 +89,7 @@ Let us analyze the total number of comparisons. If n is odd, then we perform
 3 bn=2c comparisons. If n is even, we perform 1 initial comparison followed by
 3.n  2/=2 comparisons, for a total of 3n=2  2. Thus, in either case, the total
 number of comparisons is at most 3 bn=2c.
-
-## Exercises
-
+Exercises
 9.1-1
 Show that the second smallest of n elements can be found with n C dlg ne  2
 comparisons in the worst case. (Hint: Also ﬁnd the smallest element.)
@@ -86,11 +99,11 @@ Prove the lower bound of d3n=2e  2 comparisons in the worst case to ﬁnd both
 the maximum and minimum of n numbers. (Hint: Consider how many numbers
 are potentially either the maximum or minimum, and investigate how a comparison
 affects these counts.)
-
-## 9.2 Selection in expected linear time
-
+9.2
+Selection in expected linear time
 The general selection problem appears more difﬁcult than the simple problem of
-ﬁnding a minimum. Yet, surprisingly, the asymptotic running time for both problems is the same: ‚.n/. In this section, we present a divide-and-conquer algorithm
+ﬁnding a minimum. Yet, surprisingly, the asymptotic running time for both prob-
+lems is the same: ‚.n/. In this section, we present a divide-and-conquer algorithm
 for the selection problem. The algorithm RANDOMIZED-SELECT is modeled after
 the quicksort algorithm of Chapter 7. As in quicksort, we partition the input array
 recursively. But unlike quicksort, which recursively processes both sides of the
@@ -99,19 +112,33 @@ difference shows up in the analysis: whereas quicksort has an expected running
 time of ‚.n lg n/, the expected running time of RANDOMIZED-SELECT is ‚.n/,
 assuming that the elements are distinct.
 
-RANDOMIZED-SELECT uses the procedure RANDOMIZED-PARTITION introduced in Section 7.3. Thus, like RANDOMIZED-QUICKSORT, it is a randomized algorithm, since its behavior is determined in part by the output of a random-number
+216
+Chapter 9
+Medians and Order Statistics
+RANDOMIZED-SELECT uses the procedure RANDOMIZED-PARTITION intro-
+duced in Section 7.3. Thus, like RANDOMIZED-QUICKSORT, it is a randomized al-
+gorithm, since its behavior is determined in part by the output of a random-number
 generator. The following code for RANDOMIZED-SELECT returns the ith smallest
 element of the array AŒp : : r.
 RANDOMIZED-SELECT.A; p; r; i/
+1
 if p == r
+2
 return AŒp
+3
 q D RANDOMIZED-PARTITION.A; p; r/
+4
 k D q  p C 1
+5
 if i == k
 // the pivot value is the answer
+6
 return AŒq
+7
 elseif i < k
+8
 return RANDOMIZED-SELECT.A; p; q  1; i/
+9
 else return RANDOMIZED-SELECT.A; q C 1; r; i  k/
 The RANDOMIZED-SELECT procedure works as follows. Line 1 checks for the
 base case of the recursion, in which the subarray AŒp : : r consists of just one
@@ -137,12 +164,17 @@ The worst-case running time for RANDOMIZED-SELECT is ‚.n2/, even to ﬁnd
 the minimum, because we could be extremely unlucky and always partition around
 the largest remaining element, and partitioning takes ‚.n/ time. We will see that
 
-## 9.2 Selection in expected linear time
-
-the algorithm has a linear expected running time, though, and because it is randomized, no particular input elicits the worst-case behavior.
-To analyze the expected running time of RANDOMIZED-SELECT, we let the running time on an input array AŒp : : r of n elements be a random variable that we
-denote by T .n/, and we obtain an upper bound on E ŒT .n/ as follows. The procedure RANDOMIZED-PARTITION is equally likely to return any element as the
-pivot. Therefore, for each k such that 1  k  n, the subarray AŒp : : q has k elements (all less than or equal to the pivot) with probability 1=n. For k D 1; 2; : : : ; n,
+9.2
+Selection in expected linear time
+217
+the algorithm has a linear expected running time, though, and because it is random-
+ized, no particular input elicits the worst-case behavior.
+To analyze the expected running time of RANDOMIZED-SELECT, we let the run-
+ning time on an input array AŒp : : r of n elements be a random variable that we
+denote by T .n/, and we obtain an upper bound on E ŒT .n/ as follows. The pro-
+cedure RANDOMIZED-PARTITION is equally likely to return any element as the
+pivot. Therefore, for each k such that 1  k  n, the subarray AŒp : : q has k ele-
+ments (all less than or equal to the pivot) with probability 1=n. For k D 1; 2; : : : ; n,
 we deﬁne indicator random variables Xk where
 Xk D I fthe subarray AŒp : : q has exactly k elementsg ;
 and so, assuming that the elements are distinct, we have
@@ -172,6 +204,9 @@ X
 kD1
 Xk  T .max.k  1; n  k// C O.n/ :
 
+218
+Chapter 9
+Medians and Order Statistics
 Taking expected values, we have
 E ŒT .n/
  E
@@ -195,6 +230,7 @@ D
 n
 X
 kD1
+1
 n  E ŒT .max.k  1; n  k// C O.n/
 (by equation (9.1)) .
 In order to apply equation (C.24), we rely on Xk and T .max.k  1; n  k// being
@@ -219,10 +255,12 @@ We show that E ŒT .n/ D O.n/ by substitution. Assume that E ŒT .n/  cn for
 some constant c that satisﬁes the initial conditions of the recurrence. We assume
 that T .n/ D O.1/ for n less than some constant; we shall pick this constant later.
 We also pick a constant a such that the function described by the O.n/ term above
-(which describes the non-recursive component of the running time of the algorithm) is bounded from above by an for all n > 0. Using this inductive hypothesis,
+(which describes the non-recursive component of the running time of the algo-
+rithm) is bounded from above by an for all n > 0. Using this inductive hypothesis,
 we have
 E ŒT .n/
 
+2
 n
 n1
 X
@@ -231,7 +269,7 @@ ck C an
 D
 2c
 n
-n1
+ n1
 X
 kD1
 k 
@@ -242,33 +280,41 @@ k
 !
 C an
 
-## 9.2 Selection in expected linear time
-
+9.2
+Selection in expected linear time
+219
 D
 2c
 n
 .n  1/n
+2
  .bn=2c  1/ bn=2c
+2
 
 C an
 
 2c
 n
 .n  1/n
+2
  .n=2  2/.n=2  1/
+2
 
 C an
 D
 2c
 n
 n2  n
+2
  n2=4  3n=2 C 2
+2
 
 C an
 D
 c
 n
 3n2
+4
 C n
 2  2
 
@@ -283,6 +329,7 @@ n
 C an
 
 3cn
+4
 C c
 2 C an
 D
@@ -305,9 +352,7 @@ c  4a :
 Thus, if we assume that T .n/ D O.1/ for n < 2c=.c4a/, then E ŒT .n/ D O.n/.
 We conclude that we can ﬁnd any order statistic, and in particular the median, in
 expected linear time, assuming that the elements are distinct.
-
-## Exercises
-
+Exercises
 9.2-1
 Show that RANDOMIZED-SELECT never makes a recursive call to a 0-length array.
 9.2-2
@@ -316,15 +361,18 @@ are independent.
 9.2-3
 Write an iterative version of RANDOMIZED-SELECT.
 
+220
+Chapter 9
+Medians and Order Statistics
 9.2-4
 Suppose we use RANDOMIZED-SELECT to select the minimum element of the
 array A D h3; 2; 9; 0; 7; 5; 4; 8; 6; 1i. Describe a sequence of partitions that results
 in a worst-case performance of RANDOMIZED-SELECT.
-
-## 9.3 Selection in worst-case linear time
-
+9.3
+Selection in worst-case linear time
 We now examine a selection algorithm whose running time is O.n/ in the worst
-case. Like RANDOMIZED-SELECT, the algorithm SELECT ﬁnds the desired element by recursively partitioning the input array. Here, however, we guarantee a
+case. Like RANDOMIZED-SELECT, the algorithm SELECT ﬁnds the desired ele-
+ment by recursively partitioning the input array. Here, however, we guarantee a
 good split upon partitioning the array. SELECT uses the deterministic partitioning
 algorithm PARTITION from quicksort (see Section 7.1), but modiﬁed to take the
 element to partition around as an input parameter.
@@ -333,7 +381,8 @@ distinct elements by executing the following steps. (If n D 1, then SELECT merel
 returns its only input value as the ith smallest.)
 1. Divide the n elements of the input array into bn=5c groups of 5 elements each
 and at most one group made up of the remaining n mod 5 elements.
-2. Find the median of each of the dn=5e groups by ﬁrst insertion-sorting the elements of each group (of which there are at most 5) and then picking the median
+2. Find the median of each of the dn=5e groups by ﬁrst insertion-sorting the ele-
+ments of each group (of which there are at most 5) and then picking the median
 from the sorted list of group elements.
 3. Use SELECT recursively to ﬁnd the median x of the dn=5e medians found in
 step 2. (If there are an even number of medians, then by our convention, x is
@@ -350,8 +399,9 @@ number of elements that are greater than the partitioning element x. Figure 9.1
 helps us to visualize this bookkeeping.
 At least half of the medians found in
 
-## 9.3 Selection in worst-case linear time
-
+9.3
+Selection in worst-case linear time
+221
 x
 Figure 9.1
 Analysis of the algorithm SELECT. The n elements are represented by small circles,
@@ -366,8 +416,11 @@ of the dn=5e groups contribute at least 3 elements that are greater than x, exce
 for the one group that has fewer than 5 elements if 5 does not divide n exactly, and
 the one group containing x itself. Discounting these two groups, it follows that the
 number of elements greater than x is at least
+3
 1
+2
 ln
+5
 m
  2
 
@@ -385,6 +438,9 @@ clear shortly. We can therefore obtain the recurrence
 1Because of our assumption that the numbers are distinct, all medians except x are either greater
 than or less than x.
 
+222
+Chapter 9
+Medians and Order Statistics
 T .n/ 
 (
 O.1/
@@ -394,7 +450,9 @@ if n  140 :
 We show that the running time is linear by substitution. More speciﬁcally, we will
 show that T .n/  cn for some suitably large constant c and all n > 0. We begin by
 assuming that T .n/  cn for some suitably large constant c and all n < 140; this
-assumption holds if c is large enough. We also pick a constant a such that the function described by the O.n/ term above (which describes the non-recursive component of the running time of the algorithm) is bounded above by an for all n > 0.
+assumption holds if c is large enough. We also pick a constant a such that the func-
+tion described by the O.n/ term above (which describes the non-recursive compo-
+nent of the running time of the algorithm) is bounded above by an for all n > 0.
 Substituting this inductive hypothesis into the right-hand side of the recurrence
 yields
 T .n/
@@ -410,21 +468,26 @@ which is at most cn if
 cn=10 C 7c C an  0 :
 (9.2)
 Inequality (9.2) is equivalent to the inequality c  10a.n=.n  70// when n > 70.
-Because we assume that n  140, we have n=.n  70/  2, and so choosing c  20a will satisfy inequality (9.2). (Note that there is nothing special about
+Because we assume that n  140, we have n=.n  70/  2, and so choos-
+ing c  20a will satisfy inequality (9.2). (Note that there is nothing special about
 the constant 140; we could replace it by any integer strictly greater than 70 and
 then choose c accordingly.) The worst-case running time of SELECT is therefore
 linear.
 As in a comparison sort (see Section 8.1), SELECT and RANDOMIZED-SELECT
-determine information about the relative order of elements only by comparing elements. Recall from Chapter 8 that sorting requires .n lg n/ time in the comparison model, even on average (see Problem 8-1). The linear-time sorting algorithms
-in Chapter 8 make assumptions about the input. In contrast, the linear-time selection algorithms in this chapter do not require any assumptions about the input.
+determine information about the relative order of elements only by comparing ele-
+ments. Recall from Chapter 8 that sorting requires .n lg n/ time in the compari-
+son model, even on average (see Problem 8-1). The linear-time sorting algorithms
+in Chapter 8 make assumptions about the input. In contrast, the linear-time se-
+lection algorithms in this chapter do not require any assumptions about the input.
 They are not subject to the .n lg n/ lower bound because they manage to solve
-the selection problem without sorting. Thus, solving the selection problem by sorting and indexing, as presented in the introduction to this chapter, is asymptotically
+the selection problem without sorting. Thus, solving the selection problem by sort-
+ing and indexing, as presented in the introduction to this chapter, is asymptotically
 inefﬁcient.
 
-## 9.3 Selection in worst-case linear time
-
-## Exercises
-
+9.3
+Selection in worst-case linear time
+223
+Exercises
 9.3-1
 In the algorithm SELECT, the input elements are divided into groups of 5. Will
 the algorithm work in linear time if they are divided into groups of 7? Argue that
@@ -433,7 +496,8 @@ SELECT does not run in linear time if groups of 3 are used.
 Analyze SELECT to show that if n  140, then at least dn=4e elements are greater
 than the median-of-medians x and at least dn=4e elements are less than x.
 9.3-3
-Show how quicksort can be made to run in O.n lg n/ time in the worst case, assuming that all elements are distinct.
+Show how quicksort can be made to run in O.n lg n/ time in the worst case, as-
+suming that all elements are distinct.
 9.3-4
 ?
 Suppose that an algorithm uses only comparisons to ﬁnd the ith smallest element
@@ -441,7 +505,8 @@ in a set of n elements. Show that it can also ﬁnd the i  1 smaller elements a
 the n  i larger elements without performing any additional comparisons.
 9.3-5
 Suppose that you have a “black-box” worst-case linear-time median subroutine.
-Give a simple, linear-time algorithm that solves the selection problem for an arbitrary order statistic.
+Give a simple, linear-time algorithm that solves the selection problem for an arbi-
+trary order statistic.
 9.3-6
 The kth quantiles of an n-element set are the k  1 order statistics that divide the
 sorted set into k equal-sized sets (to within 1). Give an O.n lg k/-time algorithm
@@ -458,20 +523,23 @@ in arrays X and Y .
 Professor Olay is consulting for an oil company, which is planning a large pipeline
 running east to west through an oil ﬁeld of n wells. The company wants to connect
 
+224
+Chapter 9
+Medians and Order Statistics
 Figure 9.2
-Professor Olay needs to determine the position of the east-west oil pipeline that minimizes the total length of the north-south spurs.
+Professor Olay needs to determine the position of the east-west oil pipeline that mini-
+mizes the total length of the north-south spurs.
 a spur pipeline from each well directly to the main pipeline along a shortest route
 (either north or south), as shown in Figure 9.2. Given the x- and y-coordinates of
 the wells, how should the professor pick the optimal location of the main pipeline,
 which would be the one that minimizes the total length of the spurs? Show how to
 determine the optimal location in linear time.
-
-## Problems
-
+Problems
 9-1
 Largest i numbers in sorted order
 Given a set of n numbers, we wish to ﬁnd the i largest in sorted order using a
-comparison-based algorithm. Find the algorithm that implements each of the following methods with the best asymptotic worst-case running time, and analyze the
+comparison-based algorithm. Find the algorithm that implements each of the fol-
+lowing methods with the best asymptotic worst-case running time, and analyze the
 running times of the algorithms in terms of n and i.
 a. Sort the numbers, and list the i largest.
 b. Build a max-priority queue from the numbers, and call EXTRACT-MAX i times.
@@ -479,6 +547,7 @@ c. Use an order-statistic algorithm to ﬁnd the ith largest number, partition a
 that number, and sort the i largest numbers.
 
 Problems for Chapter 9
+225
 9-2
 Weighted median
 For n distinct elements x1; x2; : : : ; xn with positive weights w1; w2; : : : ; wn such
@@ -487,16 +556,19 @@ iD1 wi D 1, the weighted (lower) median is the element xk satisfying
 X
 xi<xk
 wi < 1
+2
 and
 X
 xi>xk
 wi  1
 2 :
-For example, if the elements are 0:1; 0:35; 0:05; 0:1; 0:15; 0:05; 0:2 and each element equals its weight (that is, wi D xi for i D 1; 2; : : : ; 7), then the median is 0:1,
+For example, if the elements are 0:1; 0:35; 0:05; 0:1; 0:15; 0:05; 0:2 and each ele-
+ment equals its weight (that is, wi D xi for i D 1; 2; : : : ; 7), then the median is 0:1,
 but the weighted median is 0:2.
 a. Argue that the median of x1; x2; : : : ; xn is the weighted median of the xi with
 weights wi D 1=n for i D 1; 2; : : : ; n.
-b. Show how to compute the weighted median of n elements in O.n lg n/ worstcase time using sorting.
+b. Show how to compute the weighted median of n elements in O.n lg n/ worst-
+case time using sorting.
 c. Show how to compute the weighted median in ‚.n/ worst-case time using a
 linear-time median algorithm such as SELECT from Section 9.3.
 The post-ofﬁce location problem is deﬁned as follows. We are given n points
@@ -504,7 +576,9 @@ p1; p2; : : : ; pn with associated weights w1; w2; : : : ; wn. We wish to ﬁnd 
 (not necessarily one of the input points) that minimizes the sum Pn
 iD1 wi d.p; pi/,
 where d.a; b/ is the distance between points a and b.
-d. Argue that the weighted median is a best solution for the 1-dimensional postofﬁce location problem, in which points are simply real numbers and the distance between points a and b is d.a; b/ D ja  bj.
+d. Argue that the weighted median is a best solution for the 1-dimensional post-
+ofﬁce location problem, in which points are simply real numbers and the dis-
+tance between points a and b is d.a; b/ D ja  bj.
 e. Find the best solution for the 2-dimensional post-ofﬁce location problem, in
 which the points are .x; y/ coordinate pairs and the distance between points
 a D .x1; y1/ and b D .x2; y2/ is the Manhattan distance given by d.a; b/ D
@@ -517,6 +591,9 @@ constant hidden by the ‚-notation is rather large. When i is small relative to
 can implement a different procedure that uses SELECT as a subroutine but makes
 fewer comparisons in the worst case.
 
+226
+Chapter 9
+Medians and Order Statistics
 a. Describe an algorithm that uses Ui.n/ comparisons to ﬁnd the ith smallest of n
 elements, where
 Ui.n/ D
@@ -532,7 +609,8 @@ c. Show that if i is a constant less than n=2, then Ui.n/ D n C O.lg n/.
 d. Show that if i D n=k for k  2, then Ui.n/ D n C O.T .2n=k/ lg k/.
 9-4
 Alternative analysis of randomized selection
-In this problem, we use indicator random variables to analyze the RANDOMIZEDSELECT procedure in a manner akin to our analysis of RANDOMIZED-QUICKSORT
+In this problem, we use indicator random variables to analyze the RANDOMIZED-
+SELECT procedure in a manner akin to our analysis of RANDOMIZED-QUICKSORT
 in Section 7.4.2.
 As in the quicksort analysis, we assume that all elements are distinct, and we
 rename the elements of the input array A as ´1; ´2; : : : ; ´n, where ´i is the ith
@@ -540,16 +618,18 @@ smallest element. Thus, the call RANDOMIZED-SELECT.A; 1; n; k/ returns ´k.
 For 1  i < j  n, let
 Xijk D I f´i is compared with ´j sometime during the execution of the algorithm
 to ﬁnd ´kg :
-a. Give an exact expression for E ŒXijk. (Hint: Your expression may have different values, depending on the values of i, j , and k.)
+a. Give an exact expression for E ŒXijk. (Hint: Your expression may have differ-
+ent values, depending on the values of i, j , and k.)
 b. Let Xk denote the total number of comparisons between elements of array A
 when ﬁnding ´k. Show that
 E ŒXk  2
-k
+ k
 X
 iD1
 n
 X
 jDk
+1
 j  i C 1 C
 n
 X
@@ -564,13 +644,16 @@ k  i C 1
 !
 :
 c. Show that E ŒXk  4n.
-d. Conclude that, assuming all elements of array A are distinct, RANDOMIZEDSELECT runs in expected time O.n/.
+d. Conclude that, assuming all elements of array A are distinct, RANDOMIZED-
+SELECT runs in expected time O.n/.
 
 Notes for Chapter 9
+227
 Chapter notes
 The worst-case linear-time median-ﬁnding algorithm was devised by Blum, Floyd,
 Pratt, Rivest, and Tarjan [50]. The fast randomized version is due to Hoare [169].
-Floyd and Rivest [108] have developed an improved randomized version that partitions around an element recursively selected from a small sample of the elements.
+Floyd and Rivest [108] have developed an improved randomized version that parti-
+tions around an element recursively selected from a small sample of the elements.
 It is still unknown exactly how many comparisons are needed to determine the
 median. Bent and John [41] gave a lower bound of 2n comparisons for median
 ﬁnding, and Sch¨onhage, Paterson, and Pippenger [302] gave an upper bound of 3n.
