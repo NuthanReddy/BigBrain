@@ -62,12 +62,12 @@ ingestion:
 # Distillation settings (Phase 4)
 distillation:
   chunk_strategy: by_section     # by_section | sliding_window | by_paragraph
-  chunk_size: 1000               # max chars per chunk (sliding_window)
-  chunk_overlap: 200             # overlap between chunks (sliding_window)
-  summary_max_length: 500       # max words for summaries
+  chunk_size: 20000              # max chars per chunk (sliding_window)
+  chunk_overlap: 500             # overlap between chunks (sliding_window)
+  summary_max_length: 500        # max words for summaries
   entity_extraction: true
   relationship_extraction: true
-  max_chunks_per_doc: 200
+  max_chunks_per_doc: 10
 
 # Compilation settings (Phase 5)
 compile:

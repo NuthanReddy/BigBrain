@@ -138,13 +138,21 @@ class DistillPipeline:
         if not force and run_all:
             existing_hashes = self._store.get_chunk_hashes(doc.id)
             if existing_hashes:
-                chunks_to_process = [
-                    c for c in chunks
-                    if existing_hashes.get(c.chunk_index) != c.content_hash
-                ]
-                skipped = len(chunks) - len(chunks_to_process)
-                if skipped > 0:
-                    logger.info("  → %d unchanged chunks skipped (incremental)", skipped)
+                # If chunk count changed (different strategy/size/overlap),
+                # all old hashes are stale — reprocess everything
+                if len(existing_hashes) != len(chunks):
+                    logger.info(
+                        "  → chunk count changed (%d → %d), reprocessing all",
+                        len(existing_hashes), len(chunks),
+                    )
+                else:
+                    chunks_to_process = [
+                        c for c in chunks
+                        if existing_hashes.get(c.chunk_index) != c.content_hash
+                    ]
+                    skipped = len(chunks) - len(chunks_to_process)
+                    if skipped > 0:
+                        logger.info("  → %d unchanged chunks skipped (incremental)", skipped)
 
         if not chunks_to_process and run_all:
             logger.info("All chunks unchanged for %s — skipping AI calls", doc.title)
