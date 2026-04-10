@@ -462,11 +462,10 @@ class DigestBuilder:
     def _generate_raw_digest(
         self, doc: Document, *, force: bool = False,
     ) -> DigestResult:
-        """Extract raw chapter text with basic markdown formatting.
+        """Extract chapters as structured markdown — zero API calls.
 
-        Zero API calls. Groups sections into chapters (via PDF TOC),
-        detects section headings, formats pseudocode blocks, and adds
-        paragraph structure.
+        Uses pymupdf4llm for rich markdown (headings, bold, lists) when
+        available, falls back to basic text formatting otherwise.
         """
         result = DigestResult()
         doc_slug = _slugify(doc.title)
@@ -492,11 +491,22 @@ class DigestBuilder:
                 result.digest_files.append(str(out_path))
                 continue
 
-            formatted = _format_raw_text(content, chapter_title=title)
-            out_path.write_text(formatted, encoding="utf-8")
+            # Check if content already has markdown structure (from pymupdf4llm)
+            has_markdown = "## " in content or "**" in content or "- " in content
+            if has_markdown:
+                # Already structured — just add chapter heading if missing
+                if not content.startswith("# "):
+                    markdown = f"# {title}\n\n{content.strip()}\n"
+                else:
+                    markdown = content.strip() + "\n"
+            else:
+                # Raw text — apply formatting
+                markdown = _format_raw_text(content, chapter_title=title)
+
+            out_path.write_text(markdown, encoding="utf-8")
             result.written += 1
             result.digest_files.append(str(out_path))
-            logger.info("Wrote: %s (%d chars)", out_path.name, len(formatted))
+            logger.info("Wrote: %s (%d chars)", out_path.name, len(markdown))
 
         logger.info("Raw digest: %d chapters, 0 API calls", result.written)
         return result
@@ -623,11 +633,11 @@ class DigestBuilder:
     def _chapters_from_toc(
         pdf_path: str, sections: list,
     ) -> list[tuple[str, str]]:
-        """Extract chapters from PDF Table of Contents.
+        """Extract chapters using PDF TOC + pymupdf4llm for structured markdown.
 
-        Uses PyMuPDF to read the TOC, then maps TOC entries to document
-        sections by page number. Also extracts images from each chapter's
-        page range and saves them alongside the chapter text.
+        Uses pymupdf4llm to extract per-page markdown (with headings, bold,
+        lists, etc.), then groups pages into chapters using the TOC page ranges.
+        Falls back to raw text if pymupdf4llm is not available.
         """
         try:
             import fitz
@@ -637,9 +647,10 @@ class DigestBuilder:
             return []
 
         if not toc:
+            pdf_doc.close()
             return []
 
-        # Build list of chapter entries: (title, start_page)
+        # Build chapter entries from TOC (level 1 and 2)
         chapter_entries: list[tuple[str, int]] = []
         for level, title, page in toc:
             if level <= 2:
@@ -649,89 +660,98 @@ class DigestBuilder:
             pdf_doc.close()
             return []
 
-        # Build page_number → section content lookup
+        total_pages = len(pdf_doc)
+        pdf_doc.close()
+
+        # Try pymupdf4llm for structured markdown extraction
+        page_markdown: dict[int, str] = {}
+        try:
+            import pymupdf4llm
+            for i, (title, start_page) in enumerate(chapter_entries):
+                end_page = chapter_entries[i + 1][1] if i + 1 < len(chapter_entries) else total_pages + 1
+                page_range = list(range(start_page - 1, min(end_page - 1, total_pages)))
+                if page_range:
+                    md = pymupdf4llm.to_markdown(pdf_path, pages=page_range)
+                    page_markdown[start_page] = md
+            logger.info("Using pymupdf4llm for structured markdown extraction")
+        except ImportError:
+            logger.info("pymupdf4llm not available, using raw text")
+        except Exception as exc:
+            logger.warning("pymupdf4llm failed: %s, using raw text", exc)
+
+        # Build page_content fallback from sections
         page_content: dict[int, str] = {}
         for sec in sections:
             page_num = sec.metadata.get("page_number", 0) if sec.metadata else 0
             if page_num and sec.content:
                 page_content[page_num] = sec.content
 
-        # Group sections by chapter boundaries + extract images
+        # Group into chapters
         chapters: list[tuple[str, str]] = []
         for i, (title, start_page) in enumerate(chapter_entries):
-            if i + 1 < len(chapter_entries):
-                end_page = chapter_entries[i + 1][1]
+            end_page = chapter_entries[i + 1][1] if i + 1 < len(chapter_entries) else total_pages + 1
+
+            if start_page in page_markdown:
+                # Use pymupdf4llm structured markdown
+                content = page_markdown[start_page]
+                # Strip running headers (italic page numbers and chapter refs)
+                content = re.sub(r'^_\d+_\s*$', '', content, flags=re.MULTILINE)
+                content = re.sub(r'^_Chapter \d+.*_\s*$', '', content, flags=re.MULTILINE)
+                content = re.sub(r'^_\d+\.\d+.*_\s*$', '', content, flags=re.MULTILINE)
+                # Strip image placeholders
+                content = re.sub(r'\*\*==> picture.*?<==\*\*', '', content)
+                content = re.sub(r'\n{3,}', '\n\n', content)
             else:
-                end_page = len(pdf_doc) + 1
+                # Fallback to raw text
+                parts: list[str] = []
+                for pg in range(start_page, end_page):
+                    c = page_content.get(pg, "")
+                    if c.strip():
+                        parts.append(c)
+                content = "\n\n".join(parts)
 
-            # Collect text
-            parts: list[str] = []
-            for pg in range(start_page, end_page):
-                content = page_content.get(pg, "")
-                if content.strip():
-                    parts.append(content)
+            if content.strip():
+                chapters.append((title, content.strip()))
 
-            if not parts:
-                continue
+            # Also extract images for this chapter
+            try:
+                import fitz as fitz2
+                pdf_doc2 = fitz2.open(pdf_path)
+                chapter_slug = _slugify(title) or f"chapter-{len(chapters)}"
+                img_dir = Path("digest") / "images" / chapter_slug
+                img_refs: list[str] = []
+                img_count = 0
 
-            # Extract images from this chapter's page range
-            chapter_slug = _slugify(title) or f"chapter-{len(chapters) + 1}"
-            img_dir = Path("digest") / "images" / chapter_slug
-            image_refs: list[str] = []
-            img_count = 0
-
-            for pg_num in range(start_page - 1, min(end_page - 1, len(pdf_doc))):
-                try:
-                    page = pdf_doc[pg_num]
-                    page_area = page.rect.width * page.rect.height
-                    images = page.get_images(full=True)
-
-                    for img_tuple in images:
-                        xref = img_tuple[0]
-                        width = img_tuple[2]
-                        height = img_tuple[3]
-
-                        # Skip tiny images (icons, bullets)
-                        if width < 50 or height < 50:
-                            continue
-                        # Skip 1x1 placeholder images
-                        if width <= 1 or height <= 1:
-                            continue
-
-                        try:
-                            img_data = pdf_doc.extract_image(xref)
-                            img_bytes = img_data["image"]
-                            ext = img_data.get("ext", "png")
-
-                            # Skip very small files (likely decorations)
-                            if len(img_bytes) < 500:
+                for pg_num in range(start_page - 1, min(end_page - 1, total_pages)):
+                    try:
+                        page = pdf_doc2[pg_num]
+                        for img_tuple in page.get_images(full=True):
+                            xref, _, width, height = img_tuple[0], img_tuple[1], img_tuple[2], img_tuple[3]
+                            if width < 50 or height < 50 or width <= 1 or height <= 1:
                                 continue
+                            try:
+                                img_data = pdf_doc2.extract_image(xref)
+                                if len(img_data["image"]) < 500:
+                                    continue
+                                img_dir.mkdir(parents=True, exist_ok=True)
+                                img_count += 1
+                                ext = img_data.get("ext", "png")
+                                img_name = f"p{pg_num + 1}_img{img_count}.{ext}"
+                                (img_dir / img_name).write_bytes(img_data["image"])
+                                img_refs.append(f"![Figure (page {pg_num + 1})](images/{chapter_slug}/{img_name})")
+                            except Exception:
+                                continue
+                    except Exception:
+                        continue
 
-                            img_dir.mkdir(parents=True, exist_ok=True)
-                            img_count += 1
-                            img_name = f"p{pg_num + 1}_img{img_count}.{ext}"
-                            img_path = img_dir / img_name
-                            img_path.write_bytes(img_bytes)
+                pdf_doc2.close()
 
-                            # Find caption near the image
-                            caption = f"Figure (page {pg_num + 1})"
-                            image_refs.append(
-                                f"\n![{caption}](images/{chapter_slug}/{img_name})\n"
-                            )
-                        except Exception:
-                            continue
-                except Exception:
-                    continue
+                if img_refs and chapters:
+                    title_last, content_last = chapters[-1]
+                    chapters[-1] = (title_last, content_last + "\n\n## Figures\n\n" + "\n\n".join(img_refs))
+            except Exception:
+                pass
 
-            # Build chapter content with image references interspersed
-            chapter_text = "\n\n".join(parts)
-            if image_refs:
-                # Append images at the end of the chapter
-                chapter_text += "\n\n## Figures\n" + "\n".join(image_refs)
-
-            chapters.append((title, chapter_text))
-
-        pdf_doc.close()
         return chapters
 
         return chapters
