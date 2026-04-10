@@ -999,6 +999,37 @@ def _handle_providers(args: argparse.Namespace) -> int:
                     for m in models[:10]:
                         print(f"    • {m}")
 
+    # Rate limit info — make a tiny test request to fetch headers
+    if args.rate_info:
+        print()
+        print("Rate Limit Info")
+        print("-" * 40)
+        for provider in available:
+            if not hasattr(provider, 'rate_limit_info'):
+                continue
+            # Make a minimal request to populate rate-limit headers
+            try:
+                provider.chat(
+                    [{"role": "user", "content": "hi"}],
+                    max_tokens=1,
+                )
+            except Exception:
+                pass  # we just want the headers, ignore errors
+
+            info = provider.rate_limit_info()
+            if info.get("limit", 0) > 0:
+                import datetime as _dt
+                reset_in = max(info.get("reset_in", 0), 0)
+                reset_str = f"{reset_in:.0f}s" if reset_in < 3600 else f"{reset_in / 60:.0f}m"
+                pct = (info["remaining"] / info["limit"] * 100) if info["limit"] else 0
+                print(f"  {provider.name}:")
+                print(f"    Remaining: {info['remaining']} / {info['limit']} ({pct:.0f}%)")
+                print(f"    Resets in: {reset_str}")
+                if pct < 20:
+                    print(f"    ⚠️  Low quota — requests will be throttled")
+            else:
+                print(f"  {provider.name}: rate limit headers not available")
+
     return 0
 
 
@@ -1399,6 +1430,12 @@ def _add_providers_parser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         action="store_true",
         default=False,
         help="Also list available models for each provider",
+    )
+    p.add_argument(
+        "--rate-info",
+        action="store_true",
+        default=False,
+        help="Make a test request and show rate limit status from API headers",
     )
     p.set_defaults(func=_handle_providers)
     return p
