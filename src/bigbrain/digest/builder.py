@@ -525,17 +525,6 @@ class DigestBuilder:
                     ))
 
         return chapters
-                )
-                markdown = f"# {title}\n\n{resp.text.strip()}\n"
-                out_path.write_text(markdown, encoding="utf-8")
-                result.written += 1
-                result.digest_files.append(str(out_path))
-                logger.info("Wrote: %s", out_path)
-            except Exception as exc:
-                result.errors.append(f"{title}: {exc}")
-                logger.warning("Failed for '%s': %s", title, exc)
-
-        return result
 
     def _reformat(
         self, doc: Document, base_result: DigestResult,
