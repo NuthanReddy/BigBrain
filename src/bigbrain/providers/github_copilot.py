@@ -44,6 +44,11 @@ class GitHubCopilotProvider(BaseProvider):
         self._rate_remaining: int = -1     # requests left in window (-1 = unknown)
         self._rate_reset: float = 0.0      # unix timestamp when window resets
 
+        # Self-tracking: timestamps of recent requests (sliding 60s window)
+        self._request_timestamps: list[float] = []
+        self._total_requests: int = 0
+        self._total_errors: int = 0
+
     @property
     def name(self) -> str:
         return "github_copilot"
@@ -56,7 +61,12 @@ class GitHubCopilotProvider(BaseProvider):
         }
 
     def _update_rate_limits(self, headers: httpx.Headers) -> None:
-        """Parse rate-limit headers and update internal state."""
+        """Parse rate-limit headers and update internal state.
+
+        GitHub Copilot API does not currently return X-RateLimit-* headers.
+        Instead we track request counts and timing ourselves.
+        """
+        # Check for standard headers (in case GitHub adds them later)
         try:
             if "x-ratelimit-limit" in headers:
                 self._rate_limit = int(headers["x-ratelimit-limit"])
@@ -67,44 +77,58 @@ class GitHubCopilotProvider(BaseProvider):
         except (ValueError, TypeError):
             pass
 
+        # Self-tracking: count requests in a sliding 60-second window
+        now = time.time()
+        self._request_timestamps.append(now)
+        # Prune timestamps older than 60s
+        cutoff = now - 60.0
+        self._request_timestamps = [t for t in self._request_timestamps if t > cutoff]
+
     def _adaptive_delay(self) -> float:
         """Compute how long to wait before the next request.
 
-        Strategy:
-        - If remaining is unknown → use configured request_delay
-        - If >50% of quota left → use configured request_delay (fast)
-        - If 20-50% left → double the delay (ease off)
-        - If <20% left → spread remaining evenly across the reset window
-        - If 0 left → wait until reset
+        If API provides rate-limit headers, use those.  Otherwise use
+        self-tracked request counts in a 60-second sliding window to
+        stay under an estimated ~10 requests/minute safe rate.
         """
-        if self._rate_remaining < 0 or self._rate_limit <= 0:
-            return self._request_delay
+        # If API headers are available, use them
+        if self._rate_remaining >= 0 and self._rate_limit > 0:
+            pct = self._rate_remaining / self._rate_limit
+            if pct > 0.5:
+                return self._request_delay
+            elif pct > 0.2:
+                return self._request_delay * 2
+            elif self._rate_remaining > 0:
+                time_left = max(self._rate_reset - time.time(), 1.0)
+                return min(time_left / self._rate_remaining, 30.0)
+            else:
+                wait = max(self._rate_reset - time.time(), 10.0)
+                logger.warning("Rate limit exhausted, waiting %.1fs until reset", wait)
+                return min(wait, 120.0)
 
-        pct = self._rate_remaining / self._rate_limit
+        # Self-tracking: if we've had recent 403/429 errors, slow down
+        reqs_last_minute = len(self._request_timestamps)
+        if reqs_last_minute >= 10:
+            # We're sending a lot — slow down to ~6/min
+            return max(self._request_delay * 3, 10.0)
+        elif reqs_last_minute >= 5:
+            return max(self._request_delay * 2, 5.0)
 
-        if pct > 0.5:
-            return self._request_delay
-        elif pct > 0.2:
-            return self._request_delay * 2
-        elif self._rate_remaining > 0:
-            # Spread remaining requests across time until reset
-            time_left = max(self._rate_reset - time.time(), 1.0)
-            return min(time_left / self._rate_remaining, 30.0)
-        else:
-            # Exhausted — wait until reset
-            wait = max(self._rate_reset - time.time(), 10.0)
-            logger.warning(
-                "Rate limit exhausted, waiting %.1fs until reset", wait,
-            )
-            return min(wait, 120.0)
+        return self._request_delay
 
     def rate_limit_info(self) -> dict[str, Any]:
         """Return current rate-limit state (for diagnostics)."""
+        now = time.time()
+        cutoff = now - 60.0
+        recent = [t for t in self._request_timestamps if t > cutoff]
         return {
             "limit": self._rate_limit,
             "remaining": self._rate_remaining,
             "reset": self._rate_reset,
-            "reset_in": max(self._rate_reset - time.time(), 0),
+            "reset_in": max(self._rate_reset - now, 0),
+            "requests_last_60s": len(recent),
+            "total_requests": self._total_requests,
+            "total_errors": self._total_errors,
         }
 
     def is_available(self) -> bool:
@@ -213,6 +237,7 @@ class GitHubCopilotProvider(BaseProvider):
 
                 # Rate limit handling (429 or 403 quota exceeded)
                 if resp.status_code in (429, 403):
+                    self._total_errors += 1
                     # Prefer Retry-After header, fall back to reset timestamp
                     if "Retry-After" in resp.headers:
                         retry_after = float(resp.headers["Retry-After"])
@@ -243,6 +268,7 @@ class GitHubCopilotProvider(BaseProvider):
 
                 resp.raise_for_status()
                 data = resp.json()
+                self._total_requests += 1
 
                 choices = data.get("choices", [])
                 text = ""
@@ -253,11 +279,12 @@ class GitHubCopilotProvider(BaseProvider):
                 usage = data.get("usage", {})
 
                 # Log rate-limit state periodically
-                if self._rate_remaining >= 0 and self._rate_remaining % 10 == 0:
+                reqs_last_min = len(self._request_timestamps)
+                if self._total_requests % 5 == 0:
                     logger.debug(
-                        "Rate limit: %d/%d remaining, resets in %.0fs",
-                        self._rate_remaining, self._rate_limit,
-                        max(self._rate_reset - time.time(), 0),
+                        "Copilot: %d reqs total, %d in last 60s, delay=%.1fs",
+                        self._total_requests, reqs_last_min,
+                        self._adaptive_delay(),
                     )
 
                 return ProviderResponse(

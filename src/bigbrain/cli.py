@@ -1017,18 +1017,27 @@ def _handle_providers(args: argparse.Namespace) -> int:
                 pass  # we just want the headers, ignore errors
 
             info = provider.rate_limit_info()
+            reqs = info.get("requests_last_60s", 0)
+            total = info.get("total_requests", 0)
+            errors = info.get("total_errors", 0)
+
+            print(f"  {provider.name}:")
+            print(f"    Requests in last 60s: {reqs}")
+            print(f"    Total requests (session): {total}")
+            if errors:
+                print(f"    Rate limit errors: {errors}")
+
             if info.get("limit", 0) > 0:
                 import datetime as _dt
                 reset_in = max(info.get("reset_in", 0), 0)
                 reset_str = f"{reset_in:.0f}s" if reset_in < 3600 else f"{reset_in / 60:.0f}m"
                 pct = (info["remaining"] / info["limit"] * 100) if info["limit"] else 0
-                print(f"  {provider.name}:")
-                print(f"    Remaining: {info['remaining']} / {info['limit']} ({pct:.0f}%)")
+                print(f"    API quota: {info['remaining']} / {info['limit']} ({pct:.0f}%)")
                 print(f"    Resets in: {reset_str}")
                 if pct < 20:
                     print(f"    ⚠️  Low quota — requests will be throttled")
             else:
-                print(f"  {provider.name}: rate limit headers not available")
+                print(f"    API quota: not reported by server (Copilot uses monthly premium requests)")
 
     return 0
 
