@@ -91,6 +91,7 @@ def _handle_ingest(args: argparse.Namespace) -> int:
             recursive=args.recursive,
             file_type=args.type,
             skip_hidden=not args.include_hidden,
+            pdf_mode=getattr(args, 'pdf_mode', None),
         )
     except UserError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -1111,6 +1112,12 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> argparse.Argum
     p.add_argument(
         "--auth-token", type=str, default="",
         help="Bearer token for API authentication",
+    )
+    p.add_argument(
+        "--pdf-mode",
+        choices=["standard", "high_fidelity", "max_accuracy"],
+        default=None,
+        help="PDF extraction mode: standard (PyMuPDF), high_fidelity (marker-pdf), max_accuracy (chandra-ocr)",
     )
     p.set_defaults(func=_handle_ingest)
     return p

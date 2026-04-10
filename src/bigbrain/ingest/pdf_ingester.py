@@ -1,8 +1,12 @@
-"""PDF file ingester with PyMuPDF (primary) and pypdf (fallback).
+"""PDF file ingester with configurable backends.
 
-PyMuPDF provides superior text extraction, especially for complex layouts
-with math, pseudocode, and multi-column content.  pypdf is used as a
-fallback when PyMuPDF is not installed.
+Supports three extraction modes controlled by ``pdf_mode`` in config or CLI:
+
+- ``standard`` – PyMuPDF (primary) or pypdf (fallback).  Fast, lightweight.
+- ``high_fidelity`` – marker-pdf.  Markdown output with LaTeX math, tables,
+  figures.  Requires ``pip install 'bigbrain[marker]'``.
+- ``max_accuracy`` – chandra-ocr.  Highest benchmark scores for math/tables.
+  Requires ``pip install 'bigbrain[chandra]'``.
 """
 
 from __future__ import annotations
@@ -13,33 +17,91 @@ from pathlib import Path
 
 from bigbrain.ingest.registry import BaseIngester
 from bigbrain.kb.models import Document, DocumentSection, SourceMetadata
-from bigbrain.errors import FileAccessError
+from bigbrain.errors import FileAccessError, UserError
 from bigbrain.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+VALID_PDF_MODES = ("standard", "high_fidelity", "max_accuracy")
+
 # Heuristic: lines made mostly of non-alphanumeric chars are likely
 # figure debris (card suits, box-drawing, stray symbols).
 _JUNK_LINE_RE = re.compile(r"^[\s\W]{4,}$")
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+
+# Runtime pdf_mode — set by ingest_path() from config/CLI before calling ingest()
+_active_pdf_mode: str = "standard"
+
+
+def set_active_pdf_mode(mode: str) -> None:
+    """Set the PDF extraction mode for subsequent ingest calls."""
+    global _active_pdf_mode
+    if mode not in VALID_PDF_MODES:
+        raise UserError(
+            f"Invalid pdf_mode '{mode}'. "
+            f"Valid options: {', '.join(VALID_PDF_MODES)}"
+        )
+    _active_pdf_mode = mode
+
+
+def get_active_pdf_mode() -> str:
+    """Return the currently active PDF extraction mode."""
+    return _active_pdf_mode
 
 
 def _clean_page_text(raw: str) -> str:
     """Light cleanup of extracted PDF text."""
     lines: list[str] = []
     for line in raw.splitlines():
-        # Drop lines that are pure symbol noise (figure remnants)
         if _JUNK_LINE_RE.match(line):
             continue
         lines.append(line)
 
     text = "\n".join(lines)
-    # Collapse 3+ consecutive blank lines into 2
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
+def _split_markdown_sections(markdown: str) -> list[DocumentSection]:
+    """Split Markdown output into sections by headings."""
+    sections: list[DocumentSection] = []
+    parts = _HEADING_RE.split(markdown)
+
+    if parts[0].strip():
+        sections.append(DocumentSection(
+            title="Introduction",
+            content=parts[0].strip(),
+            level=0,
+        ))
+
+    i = 1
+    while i + 2 <= len(parts):
+        hashes = parts[i]
+        title = parts[i + 1].strip()
+        body = parts[i + 2].strip() if i + 2 < len(parts) else ""
+        sections.append(DocumentSection(
+            title=title,
+            content=body,
+            level=len(hashes),
+        ))
+        i += 3
+
+    if not sections and markdown.strip():
+        sections.append(DocumentSection(
+            title="Full Document",
+            content=markdown.strip(),
+            level=0,
+        ))
+
+    return sections
+
+
 class PdfIngester(BaseIngester):
-    """Ingests machine-readable PDF files, preserving page boundaries."""
+    """PDF ingester with configurable extraction backends.
+
+    The backend is selected at runtime from the module-level ``_active_pdf_mode``
+    (set via :func:`set_active_pdf_mode` before calling :meth:`ingest`).
+    """
 
     def supported_extensions(self) -> list[str]:
         return [".pdf"]
@@ -50,16 +112,25 @@ class PdfIngester(BaseIngester):
         if not path.is_file():
             raise FileAccessError(str(path), "file not found")
 
-        # Try PyMuPDF first (better quality), fall back to pypdf
+        mode = _active_pdf_mode
+        if mode == "high_fidelity":
+            return self._ingest_marker(path)
+        elif mode == "max_accuracy":
+            return self._ingest_chandra(path)
+        else:
+            return self._ingest_standard(path)
+
+    # ------------------------------------------------------------------
+    # Standard backend (PyMuPDF / pypdf)
+    # ------------------------------------------------------------------
+    def _ingest_standard(self, path: Path) -> Document:
+        """Extract with PyMuPDF (primary) or pypdf (fallback)."""
         try:
             return self._ingest_pymupdf(path)
         except ImportError:
             logger.info("PyMuPDF not available, falling back to pypdf")
             return self._ingest_pypdf(path)
 
-    # ------------------------------------------------------------------
-    # PyMuPDF backend
-    # ------------------------------------------------------------------
     def _ingest_pymupdf(self, path: Path) -> Document:
         import fitz  # PyMuPDF
 
@@ -90,14 +161,7 @@ class PdfIngester(BaseIngester):
 
         content = "\n\n".join(all_text_parts)
 
-        # Metadata
-        pdf_meta: dict[str, str] = {}
-        meta = doc.metadata or {}
-        for key in ("title", "author", "subject", "creator"):
-            val = meta.get(key, "")
-            if val:
-                pdf_meta[f"pdf_{key}"] = val
-
+        pdf_meta = self._extract_pdf_metadata(path, doc=doc)
         doc.close()
 
         title = pdf_meta.get("pdf_title", "") or path.stem.replace("_", " ").replace("-", " ").title()
@@ -112,16 +176,13 @@ class PdfIngester(BaseIngester):
                 source_type="pdf",
                 modified_at=datetime.fromtimestamp(stat.st_mtime),
                 size_bytes=stat.st_size,
-                extra=pdf_meta,
+                extra={**pdf_meta, "pdf_mode": "standard"},
             ),
             language="",
             sections=pages,
             metadata={"page_count": len(pages), **pdf_meta},
         )
 
-    # ------------------------------------------------------------------
-    # pypdf fallback backend
-    # ------------------------------------------------------------------
     def _ingest_pypdf(self, path: Path) -> Document:
         try:
             from pypdf import PdfReader
@@ -178,9 +239,156 @@ class PdfIngester(BaseIngester):
                 source_type="pdf",
                 modified_at=datetime.fromtimestamp(stat.st_mtime),
                 size_bytes=stat.st_size,
-                extra=pdf_meta,
+                extra={**pdf_meta, "pdf_mode": "standard"},
             ),
             language="",
             sections=pages,
             metadata={"page_count": len(pages), **pdf_meta},
         )
+
+    # ------------------------------------------------------------------
+    # marker-pdf backend (high_fidelity)
+    # ------------------------------------------------------------------
+    def _ingest_marker(self, path: Path) -> Document:
+        """High-fidelity extraction using marker-pdf."""
+        try:
+            from marker.converters.pdf import PdfConverter
+            from marker.models import create_model_dict
+            from marker.output import text_from_rendered
+        except ImportError as exc:
+            raise UserError(
+                "marker-pdf is required for high_fidelity PDF mode but is not installed. "
+                "Install with: pip install 'bigbrain[marker]'"
+            ) from exc
+
+        try:
+            converter = PdfConverter(artifact_dict=create_model_dict())
+            rendered = converter(str(path))
+            markdown_text, _, images = text_from_rendered(rendered)
+        except Exception as exc:
+            raise FileAccessError(
+                str(path), f"marker-pdf extraction failed: {exc}"
+            ) from exc
+
+        if not markdown_text or not markdown_text.strip():
+            logger.warning("marker-pdf returned empty text for %s", path)
+            markdown_text = ""
+
+        sections = _split_markdown_sections(markdown_text)
+        pdf_meta = self._extract_pdf_metadata(path)
+
+        title = (
+            pdf_meta.get("pdf_title", "")
+            or path.stem.replace("_", " ").replace("-", " ").title()
+        )
+
+        stat = path.stat()
+        image_count = len(images) if images else 0
+
+        return Document(
+            title=title,
+            content=markdown_text,
+            source=SourceMetadata(
+                file_path=str(path),
+                file_extension=".pdf",
+                source_type="pdf",
+                modified_at=datetime.fromtimestamp(stat.st_mtime),
+                size_bytes=stat.st_size,
+                extra={**pdf_meta, "pdf_mode": "high_fidelity"},
+            ),
+            language="",
+            sections=sections,
+            metadata={
+                "page_count": len(sections) or 1,
+                "image_count": image_count,
+                "pdf_mode": "high_fidelity",
+                **pdf_meta,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # chandra-ocr backend (max_accuracy)
+    # ------------------------------------------------------------------
+    def _ingest_chandra(self, path: Path) -> Document:
+        """Maximum-accuracy extraction using chandra-ocr."""
+        try:
+            from chandra_ocr import process_pdf
+        except ImportError as exc:
+            raise UserError(
+                "chandra-ocr is required for max_accuracy PDF mode but is not installed. "
+                "Install with: pip install 'bigbrain[chandra]'"
+            ) from exc
+
+        try:
+            results = process_pdf(str(path), output_format="markdown")
+            if isinstance(results, list):
+                markdown_text = "\n\n".join(
+                    r if isinstance(r, str) else str(r) for r in results
+                )
+            else:
+                markdown_text = str(results)
+        except Exception as exc:
+            raise FileAccessError(
+                str(path), f"chandra-ocr extraction failed: {exc}"
+            ) from exc
+
+        if not markdown_text or not markdown_text.strip():
+            logger.warning("chandra-ocr returned empty text for %s", path)
+            markdown_text = ""
+
+        sections = _split_markdown_sections(markdown_text)
+        pdf_meta = self._extract_pdf_metadata(path)
+
+        title = (
+            pdf_meta.get("pdf_title", "")
+            or path.stem.replace("_", " ").replace("-", " ").title()
+        )
+
+        stat = path.stat()
+
+        return Document(
+            title=title,
+            content=markdown_text,
+            source=SourceMetadata(
+                file_path=str(path),
+                file_extension=".pdf",
+                source_type="pdf",
+                modified_at=datetime.fromtimestamp(stat.st_mtime),
+                size_bytes=stat.st_size,
+                extra={**pdf_meta, "pdf_mode": "max_accuracy"},
+            ),
+            language="",
+            sections=sections,
+            metadata={
+                "section_count": len(sections),
+                "pdf_mode": "max_accuracy",
+                **pdf_meta,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_pdf_metadata(path: Path, *, doc: object | None = None) -> dict[str, str]:
+        """Extract PDF metadata using PyMuPDF if available.
+
+        If a fitz Document ``doc`` is already open, use it directly.
+        Otherwise open and close one.
+        """
+        pdf_meta: dict[str, str] = {}
+        try:
+            import fitz
+            should_close = doc is None
+            if doc is None:
+                doc = fitz.open(str(path))
+            meta = doc.metadata or {}  # type: ignore[union-attr]
+            for key in ("title", "author", "subject", "creator"):
+                val = meta.get(key, "")
+                if val:
+                    pdf_meta[f"pdf_{key}"] = val
+            if should_close:
+                doc.close()  # type: ignore[union-attr]
+        except Exception:
+            pass
+        return pdf_meta

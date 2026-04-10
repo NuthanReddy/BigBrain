@@ -6,6 +6,7 @@ from pathlib import Path
 
 from bigbrain.ingest.discovery import discover_files
 from bigbrain.ingest.registry import get_ingester, _init_default_ingesters
+from bigbrain.ingest.pdf_ingester import set_active_pdf_mode
 from bigbrain.kb.models import IngestionResult
 from bigbrain.logging_config import get_logger
 from bigbrain.config import load_config, IngestionConfig
@@ -23,6 +24,7 @@ def ingest_path(
     file_type: str = "auto",
     skip_hidden: bool | None = None,
     config: IngestionConfig | None = None,
+    pdf_mode: str | None = None,
 ) -> IngestionResult:
     """Ingest a file or directory, returning an IngestionResult.
     
@@ -33,6 +35,7 @@ def ingest_path(
     file_type : force a specific type ("txt", "md", "pdf", "py") or "auto"
     skip_hidden : override config skip_hidden setting
     config : ingestion config; loaded from default if None
+    pdf_mode : override config pdf_mode ("standard", "high_fidelity", "max_accuracy")
     """
     if config is None:
         cfg = load_config()
@@ -40,6 +43,12 @@ def ingest_path(
     
     rec = recursive if recursive is not None else config.recursive
     hidden = skip_hidden if skip_hidden is not None else config.skip_hidden
+
+    # Apply pdf_mode: CLI flag overrides config
+    effective_pdf_mode = pdf_mode or config.pdf_mode
+    set_active_pdf_mode(effective_pdf_mode)
+    if effective_pdf_mode != "standard":
+        logger.info("PDF mode: %s", effective_pdf_mode)
     
     # Discover files
     discovery = discover_files(

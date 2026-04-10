@@ -51,6 +51,8 @@ ingestion:
   max_file_size_mb: 50
   encoding: utf-8
   encoding_fallback: latin-1
+  # PDF-specific
+  pdf_mode: standard            # standard | high_fidelity (marker-pdf) | max_accuracy (chandra-ocr)
   pdf_extract_metadata: true
   pdf_preserve_pages: true
   py_extract_docstrings: true

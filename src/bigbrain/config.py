@@ -43,6 +43,7 @@ class IngestionConfig:
     encoding: str = "utf-8"
     encoding_fallback: str = "latin-1"
     # PDF-specific
+    pdf_mode: str = "standard"  # standard | high_fidelity | max_accuracy
     pdf_extract_metadata: bool = True
     pdf_preserve_pages: bool = True
     # Python-specific
@@ -791,6 +792,16 @@ def load_config(config_path: str | None = None) -> BigBrainConfig:
         # else: dataclass default is used automatically
 
     result = BigBrainConfig(**merged)
+
+    # Validate pdf_mode
+    from bigbrain.ingest.pdf_ingester import VALID_PDF_MODES
+    if result.ingestion.pdf_mode not in VALID_PDF_MODES:
+        from bigbrain.errors import ConfigError
+        raise ConfigError(
+            f"Invalid ingestion.pdf_mode '{result.ingestion.pdf_mode}'. "
+            f"Valid options: {', '.join(VALID_PDF_MODES)}"
+        )
+
     _config_cache = result
     _config_cache_path = effective_path
     return result
