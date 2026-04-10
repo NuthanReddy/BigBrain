@@ -25,6 +25,41 @@ def _resolve_doc_id(store: object, prefix: str) -> str | None:
     resolved = store.resolve_doc_id(prefix)  # type: ignore[union-attr]
     return resolved
 
+
+def _resolve_notion_page_id(value: str, cfg: object) -> str | None:
+    """Resolve a Notion page ID or name to a UUID.
+
+    If *value* looks like a UUID (32+ hex chars), use it directly.
+    Otherwise, search Notion for a page with that title.
+    """
+    import re
+    # Accept UUIDs with or without dashes
+    if re.match(r'^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$', value, re.I):
+        return value
+
+    # Search by name
+    try:
+        from bigbrain.notion.client import NotionClient
+        client = NotionClient.from_config(cfg.notion)  # type: ignore[union-attr]
+        pages = client.search_pages(query=value, page_size=5)
+        for page in pages:
+            title = client.get_page_title(page) or ""
+            if title.lower().strip() == value.lower().strip():
+                page_id = page["id"]
+                print(f"  Resolved '{value}' → {page_id}")
+                return page_id
+        # Partial match fallback
+        if pages:
+            page_id = pages[0]["id"]
+            title = client.get_page_title(pages[0]) or page_id
+            print(f"  Resolved '{value}' → {title} ({page_id})")
+            return page_id
+        print(f"Error: No Notion page found matching '{value}'")
+        return None
+    except Exception as exc:
+        print(f"Error resolving Notion page '{value}': {exc}")
+        return None
+
 def _handle_ingest(args: argparse.Namespace) -> int:
     """Run the ingestion pipeline on the specified path."""
     from bigbrain.ingest.service import ingest_path
@@ -1836,6 +1871,11 @@ def _handle_notion(args: argparse.Namespace) -> int:
 
         if not parent:
             print("Error: --parent-page-id is required for export (or set notion.default_page_id in config).")
+            return 1
+
+        # Resolve page name to UUID if it's not already a UUID
+        parent = _resolve_notion_page_id(parent, cfg)
+        if not parent:
             return 1
 
         source_type = args.type if hasattr(args, 'type') and args.type else None
