@@ -448,81 +448,158 @@ class DigestBuilder:
     def _group_into_chapters(
         self, doc: Document,
     ) -> list[tuple[str, str]]:
-        """Group document sections into chapters.
+        """Group document sections into chapters using PDF TOC.
 
-        Detection strategy:
-        1. If sections have chapter-like titles (Chapter N, Part N), use those as boundaries
-        2. Otherwise, merge sections into ~30-page groups
+        Strategy:
+        1. If the source is a PDF, extract TOC via PyMuPDF for exact
+           chapter boundaries (page numbers).
+        2. Fall back to regex heading detection if no TOC.
+        3. Fall back to fixed-size page groups as last resort.
         """
         import re
 
         sections = doc.sections or []
         if not sections:
-            # Fall back to chunks
             chunks = self._store.get_chunks(doc.id)
             if chunks:
                 return [(c.section_title or f"Section {c.chunk_index + 1}", c.content or "") for c in chunks]
-            # Last resort: split full content
             if doc.content:
                 return [("Full Document", doc.content)]
             return []
 
-        # Detect chapter boundaries from section titles or content
+        # Try PDF TOC first
+        source_path = doc.source.file_path if doc.source else ""
+        if source_path and Path(source_path).is_file() and source_path.lower().endswith(".pdf"):
+            toc_chapters = self._chapters_from_toc(source_path, sections)
+            if toc_chapters:
+                logger.info("Detected %d chapters from PDF TOC", len(toc_chapters))
+                return toc_chapters
+
+        # Fallback: regex chapter detection on content
+        chapters = self._chapters_from_content(sections)
+        if chapters and len(chapters) > 1:
+            logger.info("Detected %d chapters from content headings", len(chapters))
+            return chapters
+
+        # Last resort: group by ~80 pages
+        chapters = []
+        pages_per_group = 80
+        for i in range(0, len(sections), pages_per_group):
+            batch = sections[i:i + pages_per_group]
+            batch_content = "\n\n".join(s.content for s in batch if s.content)
+            if batch_content.strip():
+                chapters.append((
+                    f"Pages {i + 1}-{min(i + pages_per_group, len(sections))}",
+                    batch_content,
+                ))
+        logger.info("Grouped %d sections into %d page-range chapters", len(sections), len(chapters))
+        return chapters
+
+    @staticmethod
+    def _chapters_from_toc(
+        pdf_path: str, sections: list,
+    ) -> list[tuple[str, str]]:
+        """Extract chapters from PDF Table of Contents.
+
+        Uses PyMuPDF to read the TOC, then maps TOC entries to document
+        sections by page number. Only uses level-2 entries (chapters)
+        and level-1 entries (parts) as boundaries.
+        """
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            toc = doc.get_toc()
+            doc.close()
+        except Exception:
+            return []
+
+        if not toc:
+            return []
+
+        # Build list of chapter entries: (title, start_page)
+        # Use level 1 (Parts) and level 2 (Chapters) only
+        chapter_entries: list[tuple[str, int]] = []
+        for level, title, page in toc:
+            if level <= 2:
+                chapter_entries.append((title.strip(), page))
+
+        if not chapter_entries:
+            return []
+
+        # Build page_number → section content lookup
+        page_content: dict[int, str] = {}
+        for sec in sections:
+            page_num = sec.metadata.get("page_number", 0) if sec.metadata else 0
+            if page_num and sec.content:
+                page_content[page_num] = sec.content
+
+        # Group sections by chapter boundaries
+        chapters: list[tuple[str, str]] = []
+        for i, (title, start_page) in enumerate(chapter_entries):
+            # End page is the start of the next chapter (or end of doc)
+            if i + 1 < len(chapter_entries):
+                end_page = chapter_entries[i + 1][1]
+            else:
+                end_page = len(sections) + 1
+
+            # Collect all pages in this chapter's range
+            parts: list[str] = []
+            for pg in range(start_page, end_page):
+                content = page_content.get(pg, "")
+                if content.strip():
+                    parts.append(content)
+
+            if parts:
+                chapters.append((title, "\n\n".join(parts)))
+
+        return chapters
+
+    @staticmethod
+    def _chapters_from_content(sections: list) -> list[tuple[str, str]]:
+        """Detect chapters from content headings (fallback when no TOC)."""
+        import re
         chapter_re = re.compile(
-            r'^(?:Chapter|Part|Section|Unit|Module|Lecture)\s+\d',
-            re.IGNORECASE,
+            r'^(?:Chapter|CHAPTER)\s+(\d+)\s*\n\s*(.*)',
+            re.MULTILINE,
         )
 
         chapters: list[tuple[str, str]] = []
         current_title = ""
+        current_chapter_num = ""
         current_parts: list[str] = []
 
         for sec in sections:
-            title = sec.title or ""
             content = sec.content or ""
+            if not content.strip():
+                continue
 
-            # Check if this section starts a new chapter
-            is_chapter_start = bool(chapter_re.match(title))
+            head = content[:300]
+            match = chapter_re.search(head)
 
-            # Also check first line of content for chapter headings
-            if not is_chapter_start and content:
-                first_line = content.split("\n")[0].strip()
-                is_chapter_start = bool(chapter_re.match(first_line))
+            if match:
+                num = match.group(1)
+                if num != current_chapter_num:
+                    if current_parts:
+                        chapters.append((
+                            current_title or f"Chapter {len(chapters) + 1}",
+                            "\n\n".join(current_parts),
+                        ))
+                        current_parts = []
+                    current_chapter_num = num
+                    name = match.group(2).strip().split("\n")[0].strip()
+                    name = re.sub(r'\s{2,}.*', '', name)
+                    current_title = f"Chapter {num}: {name}" if name else f"Chapter {num}"
 
-            if is_chapter_start and current_parts:
-                # Flush previous chapter
-                chapters.append((
-                    current_title or f"Chapter {len(chapters) + 1}",
-                    "\n\n".join(current_parts),
-                ))
-                current_parts = []
-                current_title = title if not title.startswith("Page") else ""
+            if not current_title:
+                current_title = sec.title or f"Section {len(chapters) + 1}"
 
-            if not current_title or current_title.startswith("Page"):
-                current_title = title
+            current_parts.append(content)
 
-            if content.strip():
-                current_parts.append(content)
-
-        # Flush last chapter
         if current_parts:
             chapters.append((
                 current_title or f"Chapter {len(chapters) + 1}",
                 "\n\n".join(current_parts),
             ))
-
-        # If no chapter headings found (all "Page N"), group by ~30 pages
-        if len(chapters) <= 1 and len(sections) > 30:
-            chapters = []
-            pages_per_chapter = 30
-            for i in range(0, len(sections), pages_per_chapter):
-                batch = sections[i:i + pages_per_chapter]
-                batch_content = "\n\n".join(s.content for s in batch if s.content)
-                if batch_content.strip():
-                    chapters.append((
-                        f"Pages {i + 1}-{min(i + pages_per_chapter, len(sections))}",
-                        batch_content,
-                    ))
 
         return chapters
 
