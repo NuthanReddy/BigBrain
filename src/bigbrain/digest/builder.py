@@ -123,6 +123,97 @@ def _slugify(text: str) -> str:
     return text.strip("-")[:80]
 
 
+def _format_raw_text(text: str, chapter_title: str = "") -> str:
+    """Convert raw PDF text into readable markdown.
+
+    Detects section headings (15.1, 15.2...), theorem/lemma/corollary
+    labels, procedure names, and adds markdown structure.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+
+    if chapter_title:
+        out.append(f"# {chapter_title}\n")
+
+    # Patterns
+    # Section heading: "15.1 Rod cutting" or "15.1  Rod cutting"
+    section_re = re.compile(r'^(\d+\.\d+(?:\.\d+)?)\s{1,4}([A-Z].*)')
+    # Theorem/Lemma/Corollary: "Theorem 15.1" or "Lemma 15.2"
+    theorem_re = re.compile(r'^(Theorem|Lemma|Corollary|Definition|Property)\s+[\d.]+')
+    # Procedure name: all-caps with hyphens like "CUT-ROD", "MERGE-SORT"
+    procedure_re = re.compile(r'^([A-Z][A-Z-]+(?:\.[A-Z-]+)?)\s*\(')
+    # Exercise heading: "Exercises" or "Problems"
+    exercise_re = re.compile(r'^(Exercises|Problems)\s*$')
+    # Equation label: "(15.1)" at end of line
+    equation_re = re.compile(r'\((\d+\.\d+)\)\s*$')
+
+    in_procedure = False
+    prev_blank = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if not stripped:
+            if not prev_blank:
+                out.append("")
+            prev_blank = True
+            in_procedure = False
+            continue
+        prev_blank = False
+
+        # Detect section headings → ## heading
+        m = section_re.match(stripped)
+        if m:
+            out.append(f"\n## {m.group(1)} {m.group(2)}\n")
+            continue
+
+        # Detect theorem/lemma → **bold** block
+        m = theorem_re.match(stripped)
+        if m:
+            out.append(f"\n> **{stripped}**\n")
+            continue
+
+        # Detect procedure start → code block
+        m = procedure_re.match(stripped)
+        if m:
+            out.append(f"\n```\n{stripped}")
+            in_procedure = True
+            continue
+
+        if in_procedure:
+            # Lines that look like pseudocode (indented or short)
+            if stripped and (line.startswith("  ") or line.startswith("\t") or len(stripped) < 80):
+                out.append(stripped)
+                continue
+            else:
+                out.append("```\n")
+                in_procedure = False
+
+        # Detect exercise headers
+        if exercise_re.match(stripped):
+            out.append(f"\n## {stripped}\n")
+            continue
+
+        # Format equations: wrap in $$ if it looks like math
+        if equation_re.search(stripped):
+            eq_match = equation_re.search(stripped)
+            label = eq_match.group(1) if eq_match else ""
+            out.append(f"{stripped}")
+            continue
+
+        # Regular text
+        out.append(stripped)
+
+    # Close any open procedure block
+    if in_procedure:
+        out.append("```")
+
+    result = "\n".join(out)
+    # Clean up excessive blank lines
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip() + "\n"
+
+
 # Max chars of source text per batch — keep small so AI response fits in ~16K output tokens
 # 2-3 chapters per batch is optimal for detailed study notes
 _BATCH_MAX_CHARS = 15000
@@ -304,10 +395,11 @@ class DigestBuilder:
     def _generate_raw_digest(
         self, doc: Document, *, force: bool = False,
     ) -> DigestResult:
-        """Extract raw chapter text — zero API calls, instant.
+        """Extract raw chapter text with basic markdown formatting.
 
-        Groups sections into chapters (via PDF TOC), adds a heading,
-        and saves the raw text as markdown. Complete content, no AI.
+        Zero API calls. Groups sections into chapters (via PDF TOC),
+        detects section headings, formats pseudocode blocks, and adds
+        paragraph structure.
         """
         result = DigestResult()
         doc_slug = _slugify(doc.title)
@@ -333,11 +425,11 @@ class DigestBuilder:
                 result.digest_files.append(str(out_path))
                 continue
 
-            markdown = f"# {title}\n\n{content.strip()}\n"
-            out_path.write_text(markdown, encoding="utf-8")
+            formatted = _format_raw_text(content, chapter_title=title)
+            out_path.write_text(formatted, encoding="utf-8")
             result.written += 1
             result.digest_files.append(str(out_path))
-            logger.info("Wrote: %s (%d chars)", out_path.name, len(content))
+            logger.info("Wrote: %s (%d chars)", out_path.name, len(formatted))
 
         logger.info("Raw digest: %d chapters, 0 API calls", result.written)
         return result
@@ -476,14 +568,13 @@ class DigestBuilder:
         """Extract chapters from PDF Table of Contents.
 
         Uses PyMuPDF to read the TOC, then maps TOC entries to document
-        sections by page number. Only uses level-2 entries (chapters)
-        and level-1 entries (parts) as boundaries.
+        sections by page number. Also extracts images from each chapter's
+        page range and saves them alongside the chapter text.
         """
         try:
             import fitz
-            doc = fitz.open(pdf_path)
-            toc = doc.get_toc()
-            doc.close()
+            pdf_doc = fitz.open(pdf_path)
+            toc = pdf_doc.get_toc()
         except Exception:
             return []
 
@@ -491,13 +582,13 @@ class DigestBuilder:
             return []
 
         # Build list of chapter entries: (title, start_page)
-        # Use level 1 (Parts) and level 2 (Chapters) only
         chapter_entries: list[tuple[str, int]] = []
         for level, title, page in toc:
             if level <= 2:
                 chapter_entries.append((title.strip(), page))
 
         if not chapter_entries:
+            pdf_doc.close()
             return []
 
         # Build page_number → section content lookup
@@ -507,24 +598,83 @@ class DigestBuilder:
             if page_num and sec.content:
                 page_content[page_num] = sec.content
 
-        # Group sections by chapter boundaries
+        # Group sections by chapter boundaries + extract images
         chapters: list[tuple[str, str]] = []
         for i, (title, start_page) in enumerate(chapter_entries):
-            # End page is the start of the next chapter (or end of doc)
             if i + 1 < len(chapter_entries):
                 end_page = chapter_entries[i + 1][1]
             else:
-                end_page = len(sections) + 1
+                end_page = len(pdf_doc) + 1
 
-            # Collect all pages in this chapter's range
+            # Collect text
             parts: list[str] = []
             for pg in range(start_page, end_page):
                 content = page_content.get(pg, "")
                 if content.strip():
                     parts.append(content)
 
-            if parts:
-                chapters.append((title, "\n\n".join(parts)))
+            if not parts:
+                continue
+
+            # Extract images from this chapter's page range
+            chapter_slug = _slugify(title) or f"chapter-{len(chapters) + 1}"
+            img_dir = Path("digest") / "images" / chapter_slug
+            image_refs: list[str] = []
+            img_count = 0
+
+            for pg_num in range(start_page - 1, min(end_page - 1, len(pdf_doc))):
+                try:
+                    page = pdf_doc[pg_num]
+                    page_area = page.rect.width * page.rect.height
+                    images = page.get_images(full=True)
+
+                    for img_tuple in images:
+                        xref = img_tuple[0]
+                        width = img_tuple[2]
+                        height = img_tuple[3]
+
+                        # Skip tiny images (icons, bullets)
+                        if width < 50 or height < 50:
+                            continue
+                        # Skip 1x1 placeholder images
+                        if width <= 1 or height <= 1:
+                            continue
+
+                        try:
+                            img_data = pdf_doc.extract_image(xref)
+                            img_bytes = img_data["image"]
+                            ext = img_data.get("ext", "png")
+
+                            # Skip very small files (likely decorations)
+                            if len(img_bytes) < 500:
+                                continue
+
+                            img_dir.mkdir(parents=True, exist_ok=True)
+                            img_count += 1
+                            img_name = f"p{pg_num + 1}_img{img_count}.{ext}"
+                            img_path = img_dir / img_name
+                            img_path.write_bytes(img_bytes)
+
+                            # Find caption near the image
+                            caption = f"Figure (page {pg_num + 1})"
+                            image_refs.append(
+                                f"\n![{caption}](images/{chapter_slug}/{img_name})\n"
+                            )
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+
+            # Build chapter content with image references interspersed
+            chapter_text = "\n\n".join(parts)
+            if image_refs:
+                # Append images at the end of the chapter
+                chapter_text += "\n\n## Figures\n" + "\n".join(image_refs)
+
+            chapters.append((title, chapter_text))
+
+        pdf_doc.close()
+        return chapters
 
         return chapters
 

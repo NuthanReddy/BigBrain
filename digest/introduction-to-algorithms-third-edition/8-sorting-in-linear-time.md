@@ -1,145 +1,1358 @@
 # 8 Sorting in Linear Time
 
-```markdown
-# Sorting in Linear Time: Study Notes
+8
+Sorting in Linear Time
+We have now introduced several algorithms that can sort n numbers in O.n lg n/
+time. Merge sort and heapsort achieve this upper bound in the worst case; quicksort
+achieves it on average. Moreover, for each of these algorithms, we can produce a
+sequence of n input numbers that causes the algorithm to run in .n lg n/ time.
+These algorithms share an interesting property: the sorted order they determine
+is based only on comparisons between the input elements. We call such sorting
+algorithms comparison sorts. All the sorting algorithms introduced thus far are
+comparison sorts.
+In Section 8.1, we shall prove that any comparison sort must make .n lg n/
+comparisons in the worst case to sort n elements. Thus, merge sort and heapsort
+are asymptotically optimal, and no comparison sort exists that is faster by more
+than a constant factor.
+Sections 8.2, 8.3, and 8.4 examine three sorting algorithms—counting sort, radix
+sort, and bucket sort—that run in linear time. Of course, these algorithms use
+operations other than comparisons to determine the sorted order. Consequently,
+the .n lg n/ lower bound does not apply to them.
+8.1
+Lower bounds for sorting
+In a comparison sort, we use only comparisons between elements to gain order
+information about an input sequence ha1; a2; : : : ; ani. That is, given two elements
+ai and aj, we perform one of the tests ai < aj, ai  aj, ai D aj, ai  aj, or
+ai > aj to determine their relative order. We may not inspect the values of the
+elements or gain order information about them in any other way.
+In this section, we assume without loss of generality that all the input elements
+are distinct. Given this assumption, comparisons of the form ai D aj are useless,
+so we can assume that no comparisons of this form are made. We also note that
+the comparisons ai  aj, ai  aj, ai > aj, and ai < aj are all equivalent in that
 
-## Overview
-In earlier sections, sorting algorithms like Merge Sort, QuickSort, and HeapSort were introduced, all achieving an **O(n lg n)** complexity, which is the optimal bound for comparison-based sorting algorithms. However, these algorithms rely exclusively on comparison operations. In this chapter, we examine **non-comparison-based sorting algorithms** like **Counting Sort**, **Radix Sort**, and **Bucket Sort**, which can sort in **linear time** (i.e., **O(n)**) under certain conditions. These algorithms achieve improved performance by leveraging additional constraints, such as assumptions about the input distribution.
+192
+Chapter 8
+Sorting in Linear Time
+≤
+>
+≤
+>
+1:2
+2:3
+1:3
+〈1,2,3〉
+1:3
+〈2,1,3〉
+2:3
+〈1,3,2〉
+〈3,1,2〉
+〈3,2,1〉
+≤
+>
+≤
+>
+≤
+>
+〈2,3,1〉
+Figure 8.1
+The decision tree for insertion sort operating on three elements. An internal node an-
+notated by i:j indicates a comparison between ai and aj . A leaf annotated by the permutation
+h.1/; .2/; : : : ; .n/i indicates the ordering a.1/  a.2/      a.n/. The shaded path
+indicates the decisions made when sorting the input sequence ha1 D 6; a2 D 8; a3 D 5i; the
+permutation h3; 1; 2i at the leaf indicates that the sorted ordering is a3 D 5  a1 D 6  a2 D 8.
+There are 3Š D 6 possible permutations of the input elements, and so the decision tree must have at
+least 6 leaves.
+they yield identical information about the relative order of ai and aj. We therefore
+assume that all comparisons have the form ai  aj.
+The decision-tree model
+We can view comparison sorts abstractly in terms of decision trees. A decision
+tree is a full binary tree that represents the comparisons between elements that
+are performed by a particular sorting algorithm operating on an input of a given
+size. Control, data movement, and all other aspects of the algorithm are ignored.
+Figure 8.1 shows the decision tree corresponding to the insertion sort algorithm
+from Section 2.1 operating on an input sequence of three elements.
+In a decision tree, we annotate each internal node by i:j for some i and j in the
+range 1  i; j  n, where n is the number of elements in the input sequence. We
+also annotate each leaf by a permutation h.1/; .2/; : : : ; .n/i. (See Section C.1
+for background on permutations.) The execution of the sorting algorithm corre-
+sponds to tracing a simple path from the root of the decision tree down to a leaf.
+Each internal node indicates a comparison ai  aj. The left subtree then dictates
+subsequent comparisons once we know that ai  aj, and the right subtree dictates
+subsequent comparisons knowing that ai > aj. When we come to a leaf, the sort-
+ing algorithm has established the ordering a.1/  a.2/      a.n/. Because
+any correct sorting algorithm must be able to produce each permutation of its input,
+each of the nŠ permutations on n elements must appear as one of the leaves of the
+decision tree for a comparison sort to be correct. Furthermore, each of these leaves
+must be reachable from the root by a downward path corresponding to an actual
 
-This chapter also introduces the **decision-tree model**, a theoretical foundation to prove that comparison-based sorts have a worst-case lower bound of **Ω(n lg n)**.
+8.1
+Lower bounds for sorting
+193
+execution of the comparison sort. (We shall refer to such leaves as “reachable.”)
+Thus, we shall consider only decision trees in which each permutation appears as
+a reachable leaf.
+A lower bound for the worst case
+The length of the longest simple path from the root of a decision tree to any of
+its reachable leaves represents the worst-case number of comparisons that the cor-
+responding sorting algorithm performs. Consequently, the worst-case number of
+comparisons for a given comparison sort algorithm equals the height of its decision
+tree. A lower bound on the heights of all decision trees in which each permutation
+appears as a reachable leaf is therefore a lower bound on the running time of any
+comparison sort algorithm. The following theorem establishes such a lower bound.
+Theorem 8.1
+Any comparison sort algorithm requires .n lg n/ comparisons in the worst case.
+Proof
+From the preceding discussion, it sufﬁces to determine the height of a
+decision tree in which each permutation appears as a reachable leaf. Consider a
+decision tree of height h with l reachable leaves corresponding to a comparison
+sort on n elements. Because each of the nŠ permutations of the input appears as
+some leaf, we have nŠ  l. Since a binary tree of height h has no more than 2h
+leaves, we have
+nŠ  l  2h ;
+which, by taking logarithms, implies
+h
+
+lg.nŠ/
+(since the lg function is monotonically increasing)
+D
+.n lg n/
+(by equation (3.19)) .
+Corollary 8.2
+Heapsort and merge sort are asymptotically optimal comparison sorts.
+Proof
+The O.n lg n/ upper bounds on the running times for heapsort and merge
+sort match the .n lg n/ worst-case lower bound from Theorem 8.1.
+Exercises
+8.1-1
+What is the smallest possible depth of a leaf in a decision tree for a comparison
+sort?
 
----
+194
+Chapter 8
+Sorting in Linear Time
+8.1-2
+Obtain asymptotically tight bounds on lg.nŠ/ without using Stirling’s approxi-
+mation. Instead, evaluate the summation Pn
+kD1 lg k using techniques from Sec-
+tion A.2.
+8.1-3
+Show that there is no comparison sort whose running time is linear for at least half
+of the nŠ inputs of length n. What about a fraction of 1=n of the inputs of length n?
+What about a fraction 1=2n?
+8.1-4
+Suppose that you are given a sequence of n elements to sort. The input sequence
+consists of n=k subsequences, each containing k elements. The elements in a given
+subsequence are all smaller than the elements in the succeeding subsequence and
+larger than the elements in the preceding subsequence. Thus, all that is needed to
+sort the whole sequence of length n is to sort the k elements in each of the n=k
+subsequences. Show an .n lg k/ lower bound on the number of comparisons
+needed to solve this variant of the sorting problem. (Hint: It is not rigorous to
+simply combine the lower bounds for the individual subsequences.)
+8.2
+Counting sort
+Counting sort assumes that each of the n input elements is an integer in the range
+0 to k, for some integer k. When k D O.n/, the sort runs in ‚.n/ time.
+Counting sort determines, for each input element x, the number of elements less
+than x. It uses this information to place element x directly into its position in the
+output array. For example, if 17 elements are less than x, then x belongs in output
+position 18. We must modify this scheme slightly to handle the situation in which
+several elements have the same value, since we do not want to put them all in the
+same position.
+In the code for counting sort, we assume that the input is an array AŒ1 : : n, and
+thus A:length D n. We require two other arrays: the array BŒ1 : : n holds the
+sorted output, and the array CŒ0 : : k provides temporary working storage.
 
-## Key Concepts
+8.2
+Counting sort
+195
+2
+5
+3
+0
+2
+3
+0
+3
+1
+2
+3
+4
+5
+6
+7
+8
+2
+0
+2
+3
+0
+1
+1
+2
+3
+4
+5
+A
+C
+(a)
+2
+2
+4
+7
+7
+8
+C
+(b)
+3
+1
+2
+3
+4
+5
+6
+7
+8
+2
+2
+4
+6
+7
+8
+B
+C
+(c)
+3
+1
+2
+3
+4
+5
+6
+7
+8
+1
+2
+4
+6
+7
+8
+B
+C
+(d)
+0
+3
+1
+2
+3
+4
+5
+6
+7
+8
+1
+2
+4
+5
+7
+8
+B
+C
+(e)
+0
+3
+3
+1
+2
+3
+4
+5
+6
+7
+8
+B
+(f)
+0
+3
+0
+2
+2
+3
+5
+0
+1
+2
+3
+4
+5
+0
+1
+2
+3
+4
+5
+0
+1
+2
+3
+4
+5
+0
+1
+2
+3
+4
+5
+0
+Figure 8.2
+The operation of COUNTING-SORT on an input array AŒ1 : : 8, where each element
+of A is a nonnegative integer no larger than k D 5. (a) The array A and the auxiliary array C after
+line 5. (b) The array C after line 8. (c)–(e) The output array B and the auxiliary array C after one,
+two, and three iterations of the loop in lines 10–12, respectively. Only the lightly shaded elements of
+array B have been ﬁlled in. (f) The ﬁnal sorted output array B.
+COUNTING-SORT.A; B; k/
+1
+let CŒ0 : : k be a new array
+2
+for i D 0 to k
+3
+CŒi D 0
+4
+for j D 1 to A:length
+5
+CŒAŒj  D CŒAŒj  C 1
+6
+// CŒi now contains the number of elements equal to i.
+7
+for i D 1 to k
+8
+CŒi D CŒi C CŒi  1
+9
+// CŒi now contains the number of elements less than or equal to i.
+10
+for j D A:length downto 1
+11
+BŒCŒAŒj  D AŒj 
+12
+CŒAŒj  D CŒAŒj   1
+Figure 8.2 illustrates counting sort. After the for loop of lines 2–3 initializes the
+array C to all zeros, the for loop of lines 4–5 inspects each input element. If the
+value of an input element is i, we increment CŒi. Thus, after line 5, CŒi holds
+the number of input elements equal to i for each integer i D 0; 1; : : : ; k. Lines 7–8
+determine for each i D 0; 1; : : : ; k how many input elements are less than or equal
+to i by keeping a running sum of the array C.
 
-- **Comparison Sorts**:
-    - Sorting algorithms that rely solely on comparisons to determine order.
-    - Examples: Merge Sort, QuickSort, HeapSort.
-    - Lower bound for worst-case running time: **Ω(n lg n)** (proven using decision trees).
+196
+Chapter 8
+Sorting in Linear Time
+Finally, the for loop of lines 10–12 places each element AŒj  into its correct
+sorted position in the output array B. If all n elements are distinct, then when we
+ﬁrst enter line 10, for each AŒj , the value CŒAŒj  is the correct ﬁnal position
+of AŒj  in the output array, since there are CŒAŒj  elements less than or equal
+to AŒj . Because the elements might not be distinct, we decrement CŒAŒj  each
+time we place a value AŒj  into the B array. Decrementing CŒAŒj  causes the
+next input element with a value equal to AŒj , if one exists, to go to the position
+immediately before AŒj  in the output array.
+How much time does counting sort require? The for loop of lines 2–3 takes
+time ‚.k/, the for loop of lines 4–5 takes time ‚.n/, the for loop of lines 7–8 takes
+time ‚.k/, and the for loop of lines 10–12 takes time ‚.n/. Thus, the overall time
+is ‚.k C n/. In practice, we usually use counting sort when we have k D O.n/, in
+which case the running time is ‚.n/.
+Counting sort beats the lower bound of .n lg n/ proved in Section 8.1 because
+it is not a comparison sort. In fact, no comparisons between input elements occur
+anywhere in the code. Instead, counting sort uses the actual values of the elements
+to index into an array. The .n lg n/ lower bound for sorting does not apply when
+we depart from the comparison sort model.
+An important property of counting sort is that it is stable: numbers with the same
+value appear in the output array in the same order as they do in the input array. That
+is, it breaks ties between two numbers by the rule that whichever number appears
+ﬁrst in the input array appears ﬁrst in the output array. Normally, the property of
+stability is important only when satellite data are carried around with the element
+being sorted. Counting sort’s stability is important for another reason: counting
+sort is often used as a subroutine in radix sort. As we shall see in the next section,
+in order for radix sort to work correctly, counting sort must be stable.
+Exercises
+8.2-1
+Using Figure 8.2 as a model, illustrate the operation of COUNTING-SORT on the
+array A D h6; 0; 2; 0; 1; 3; 4; 6; 1; 3; 2i.
+8.2-2
+Prove that COUNTING-SORT is stable.
+8.2-3
+Suppose that we were to rewrite the for loop header in line 10 of the COUNTING-
+SORT as
+10
+for j D 1 to A:length
+Show that the algorithm still works properly. Is the modiﬁed algorithm stable?
 
-- **Non-Comparison Sorts**:
-    - Algorithms that use operations on the input elements beyond comparisons.
-    - Leverage properties like input distribution or integer-based keys.
-    - Can achieve linear time complexity under certain conditions.
+8.3
+Radix sort
+197
+8.2-4
+Describe an algorithm that, given n integers in the range 0 to k, preprocesses its
+input and then answers any query about how many of the n integers fall into a
+range Œa : : b in O.1/ time. Your algorithm should use ‚.n C k/ preprocessing
+time.
+8.3
+Radix sort
+Radix sort is the algorithm used by the card-sorting machines you now ﬁnd only in
+computer museums. The cards have 80 columns, and in each column a machine can
+punch a hole in one of 12 places. The sorter can be mechanically “programmed”
+to examine a given column of each card in a deck and distribute the card into one
+of 12 bins depending on which place has been punched. An operator can then
+gather the cards bin by bin, so that cards with the ﬁrst place punched are on top of
+cards with the second place punched, and so on.
+For decimal digits, each column uses only 10 places. (The other two places
+are reserved for encoding nonnumeric characters.) A d-digit number would then
+occupy a ﬁeld of d columns. Since the card sorter can look at only one column
+at a time, the problem of sorting n cards on a d-digit number requires a sorting
+algorithm.
+Intuitively, you might sort numbers on their most signiﬁcant digit, sort each of
+the resulting bins recursively, and then combine the decks in order. Unfortunately,
+since the cards in 9 of the 10 bins must be put aside to sort each of the bins, this
+procedure generates many intermediate piles of cards that you would have to keep
+track of. (See Exercise 8.3-5.)
+Radix sort solves the problem of card sorting—counterintuitively—by sorting on
+the least signiﬁcant digit ﬁrst. The algorithm then combines the cards into a single
+deck, with the cards in the 0 bin preceding the cards in the 1 bin preceding the
+cards in the 2 bin, and so on. Then it sorts the entire deck again on the second-least
+signiﬁcant digit and recombines the deck in a like manner. The process continues
+until the cards have been sorted on all d digits. Remarkably, at that point the cards
+are fully sorted on the d-digit number. Thus, only d passes through the deck are
+required to sort. Figure 8.3 shows how radix sort operates on a “deck” of seven
+3-digit numbers.
+In order for radix sort to work correctly, the digit sorts must be stable. The sort
+performed by a card sorter is stable, but the operator has to be wary about not
+changing the order of the cards as they come out of a bin, even though all the cards
+in a bin have the same digit in the chosen column.
 
-- **Decision Tree Model**:
-    - Abstract representation of a comparison sort as a full binary tree.
-    - Nodes represent comparisons, and leaves represent possible sorted permutations.
-    - Height of the decision tree determines the worst-case number of comparisons.
+198
+Chapter 8
+Sorting in Linear Time
+329
+457
+657
+839
+436
+720
+355
+329
+457
+657
+839
+436
+720
+355
+329
+457
+657
+839
+436
+720
+355
+329
+457
+657
+839
+436
+720
+355
+Figure 8.3
+The operation of radix sort on a list of seven 3-digit numbers. The leftmost column is
+the input. The remaining columns show the list after successive sorts on increasingly signiﬁcant digit
+positions. Shading indicates the digit position sorted on to produce each list from the previous one.
+In a typical computer, which is a sequential random-access machine, we some-
+times use radix sort to sort records of information that are keyed by multiple ﬁelds.
+For example, we might wish to sort dates by three keys: year, month, and day. We
+could run a sorting algorithm with a comparison function that, given two dates,
+compares years, and if there is a tie, compares months, and if another tie occurs,
+compares days. Alternatively, we could sort the information three times with a
+stable sort: ﬁrst on day, next on month, and ﬁnally on year.
+The code for radix sort is straightforward. The following procedure assumes that
+each element in the n-element array A has d digits, where digit 1 is the lowest-order
+digit and digit d is the highest-order digit.
+RADIX-SORT.A; d/
+1
+for i D 1 to d
+2
+use a stable sort to sort array A on digit i
+Lemma 8.3
+Given n d-digit numbers in which each digit can take on up to k possible values,
+RADIX-SORT correctly sorts these numbers in ‚.d.n C k// time if the stable sort
+it uses takes ‚.n C k/ time.
+Proof
+The correctness of radix sort follows by induction on the column being
+sorted (see Exercise 8.3-3). The analysis of the running time depends on the stable
+sort used as the intermediate sorting algorithm. When each digit is in the range 0
+to k1 (so that it can take on k possible values), and k is not too large, counting sort
+is the obvious choice. Each pass over n d-digit numbers then takes time ‚.nCk/.
+There are d passes, and so the total time for radix sort is ‚.d.n C k//.
+When d is constant and k D O.n/, we can make radix sort run in linear time.
+More generally, we have some ﬂexibility in how to break each key into digits.
 
-- **Stability**:
-    - A sorting algorithm is stable if two elements with the same value appear in the same relative order in both input and output.
-    - Stability is vital in algorithms like radix sort that rely on intermediate sorting.
+8.3
+Radix sort
+199
+Lemma 8.4
+Given n b-bit numbers and any positive integer r  b, RADIX-SORT correctly sorts
+these numbers in ‚..b=r/.n C 2r// time if the stable sort it uses takes ‚.n C k/
+time for inputs in the range 0 to k.
+Proof
+For a value r  b, we view each key as having d D db=re digits of r bits
+each. Each digit is an integer in the range 0 to 2r  1, so that we can use counting
+sort with k D 2r 1. (For example, we can view a 32-bit word as having four 8-bit
+digits, so that b D 32, r D 8, k D 2r  1 D 255, and d D b=r D 4.) Each pass of
+counting sort takes time ‚.n C k/ D ‚.n C 2r/ and there are d passes, for a total
+running time of ‚.d.n C 2r// D ‚..b=r/.n C 2r//.
+For given values of n and b, we wish to choose the value of r, with r  b,
+that minimizes the expression .b=r/.n C 2r/. If b < blg nc, then for any value
+of r  b, we have that .n C 2r/ D ‚.n/. Thus, choosing r D b yields a running
+time of .b=b/.n C 2b/ D ‚.n/, which is asymptotically optimal. If b  blg nc,
+then choosing r D blg nc gives the best time to within a constant factor, which
+we can see as follows. Choosing r D blg nc yields a running time of ‚.bn= lg n/.
+As we increase r above blg nc, the 2r term in the numerator increases faster than
+the r term in the denominator, and so increasing r above blg nc yields a running
+time of .bn= lg n/. If instead we were to decrease r below blg nc, then the b=r
+term increases and the n C 2r term remains at ‚.n/.
+Is radix sort preferable to a comparison-based sorting algorithm, such as quick-
+sort? If b D O.lg n/, as is often the case, and we choose r  lg n, then radix sort’s
+running time is ‚.n/, which appears to be better than quicksort’s expected running
+time of ‚.n lg n/. The constant factors hidden in the ‚-notation differ, however.
+Although radix sort may make fewer passes than quicksort over the n keys, each
+pass of radix sort may take signiﬁcantly longer. Which sorting algorithm we prefer
+depends on the characteristics of the implementations, of the underlying machine
+(e.g., quicksort often uses hardware caches more effectively than radix sort), and
+of the input data. Moreover, the version of radix sort that uses counting sort as the
+intermediate stable sort does not sort in place, which many of the ‚.n lg n/-time
+comparison sorts do. Thus, when primary memory storage is at a premium, we
+might prefer an in-place algorithm such as quicksort.
+Exercises
+8.3-1
+Using Figure 8.3 as a model, illustrate the operation of RADIX-SORT on the fol-
+lowing list of English words: COW, DOG, SEA, RUG, ROW, MOB, BOX, TAB,
+BAR, EAR, TAR, DIG, BIG, TEA, NOW, FOX.
 
----
+200
+Chapter 8
+Sorting in Linear Time
+8.3-2
+Which of the following sorting algorithms are stable: insertion sort, merge sort,
+heapsort, and quicksort? Give a simple scheme that makes any sorting algorithm
+stable. How much additional time and space does your scheme entail?
+8.3-3
+Use induction to prove that radix sort works. Where does your proof need the
+assumption that the intermediate sort is stable?
+8.3-4
+Show how to sort n integers in the range 0 to n3  1 in O.n/ time.
+8.3-5
+?
+In the ﬁrst card-sorting algorithm in this section, exactly how many sorting passes
+are needed to sort d-digit decimal numbers in the worst case? How many piles of
+cards would an operator need to keep track of in the worst case?
+8.4
+Bucket sort
+Bucket sort assumes that the input is drawn from a uniform distribution and has an
+average-case running time of O.n/. Like counting sort, bucket sort is fast because
+it assumes something about the input. Whereas counting sort assumes that the input
+consists of integers in a small range, bucket sort assumes that the input is generated
+by a random process that distributes elements uniformly and independently over
+the interval Œ0; 1/. (See Section C.2 for a deﬁnition of uniform distribution.)
+Bucket sort divides the interval Œ0; 1/ into n equal-sized subintervals, or buckets,
+and then distributes the n input numbers into the buckets. Since the inputs are uni-
+formly and independently distributed over Œ0; 1/, we do not expect many numbers
+to fall into each bucket. To produce the output, we simply sort the numbers in each
+bucket and then go through the buckets in order, listing the elements in each.
+Our code for bucket sort assumes that the input is an n-element array A and
+that each element AŒi in the array satisﬁes 0  AŒi < 1. The code requires an
+auxiliary array BŒ0 : : n  1 of linked lists (buckets) and assumes that there is a
+mechanism for maintaining such lists. (Section 10.2 describes how to implement
+basic operations on linked lists.)
 
-## Algorithms and Techniques
+8.4
+Bucket sort
+201
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+.78
+.17
+.39
+.72
+.94
+.21
+.12
+.23
+.68
+A
+(a)
+1
+2
+3
+4
+5
+6
+7
+8
+9
+B
+(b)
+0
+.12
+.17
+.21
+.23
+.26
+.26
+.39
+.68
+.72
+.78
+.94
+Figure 8.4
+The operation of BUCKET-SORT for n D 10. (a) The input array AŒ1 : : 10. (b) The
+array BŒ0 : : 9 of sorted lists (buckets) after line 8 of the algorithm. Bucket i holds values in the
+half-open interval Œi=10; .i C 1/=10/. The sorted output consists of a concatenation in order of the
+lists BŒ0; BŒ1; : : : ; BŒ9.
+BUCKET-SORT.A/
+1
+let BŒ0 : : n  1 be a new array
+2
+n D A:length
+3
+for i D 0 to n  1
+4
+make BŒi an empty list
+5
+for i D 1 to n
+6
+insert AŒi into list BŒbnAŒic
+7
+for i D 0 to n  1
+8
+sort list BŒi with insertion sort
+9
+concatenate the lists BŒ0; BŒ1; : : : ; BŒn  1 together in order
+Figure 8.4 shows the operation of bucket sort on an input array of 10 numbers.
+To see that this algorithm works, consider two elements AŒi and AŒj . Assume
+without loss of generality that AŒi  AŒj . Since bnAŒic  bnAŒj c, either
+element AŒi goes into the same bucket as AŒj  or it goes into a bucket with a lower
+index. If AŒi and AŒj  go into the same bucket, then the for loop of lines 7–8 puts
+them into the proper order. If AŒi and AŒj  go into different buckets, then line 9
+puts them into the proper order. Therefore, bucket sort works correctly.
+To analyze the running time, observe that all lines except line 8 take O.n/ time
+in the worst case. We need to analyze the total time taken by the n calls to insertion
+sort in line 8.
 
-### Decision Tree Model and Lower Bounds
+202
+Chapter 8
+Sorting in Linear Time
+To analyze the cost of the calls to insertion sort, let ni be the random variable
+denoting the number of elements placed in bucket BŒi. Since insertion sort runs
+in quadratic time (see Section 2.2), the running time of bucket sort is
+T .n/ D ‚.n/ C
+n1
+X
+iD0
+O.n2
+i / :
+We now analyze the average-case running time of bucket sort, by computing the
+expected value of the running time, where we take the expectation over the input
+distribution. Taking expectations of both sides and using linearity of expectation,
+we have
+E ŒT .n/
+D
+E
+"
+‚.n/ C
+n1
+X
+iD0
+O.n2
+i /
+#
+D
+‚.n/ C
+n1
+X
+iD0
+E
+
+O.n2
+i /
+
+(by linearity of expectation)
+D
+‚.n/ C
+n1
+X
+iD0
+O
 
-#### How It Works
-- The **decision tree model** abstracts a comparison sort algorithm as a binary tree:
-    - Internal nodes represent comparisons (e.g., `ai ≤ aj`).
-    - Leaves represent sorted permutations.
-    - A path from the root to a leaf corresponds to the sequence of comparisons made by the algorithm for a specific input.
+E
+
+n2
+i
+
 
-#### Key Theorem
-**Theorem 8.1**  
-- Any comparison sort algorithm requires **Ω(n lg n)** comparisons in the worst case.
+(by equation (C.22)) .
+(8.1)
+We claim that
+E
+
+n2
+i
+
+D 2  1=n
+(8.2)
+for i D 0; 1; : : : ; n  1. It is no surprise that each bucket i has the same value of
+E Œn2
+i , since each value in the input array A is equally likely to fall in any bucket.
+To prove equation (8.2), we deﬁne indicator random variables
+Xij D I fAŒj  falls in bucket ig
+for i D 0; 1; : : : ; n  1 and j D 1; 2; : : : ; n. Thus,
+ni D
+n
+X
+jD1
+Xij :
+To compute E Œn2
+i , we expand the square and regroup terms:
 
-**Proof**:  
-1. A correct comparison sort must account for all possible permutations of the input, i.e., **n!** permutations.
-2. Each permutation must correspond to a distinct leaf in the decision tree.
-3. A binary tree with height `h` has at most `2^h` leaves.
-4. For a valid decision tree:
-   \[
-   n! \leq 2^h
-   \]
-   Taking logarithms:
-   \[
-   h \geq \lg(n!)
-   \]
-   Using the asymptotic bound for \(\lg(n!)\), \(h = Ω(n \lg n)\).
+8.4
+Bucket sort
+203
+E
+
+n2
+i
+
+D
+E
+" n
+X
+jD1
+Xij
+!2#
+D
+E
+" n
+X
+jD1
+n
+X
+kD1
+XijXik
+#
+D
+E
+2
+4
+n
+X
+jD1
+X 2
+ij C
+X
+1jn
+X
+1kn
+k¤j
+XijXik
+3
+5
+D
+n
+X
+jD1
+E
+
+X 2
+ij
+
+C
+X
+1jn
+X
+1kn
+k¤j
+E ŒXijXik ;
+(8.3)
+where the last line follows by linearity of expectation. We evaluate the two sum-
+mations separately. Indicator random variable Xij is 1 with probability 1=n and 0
+otherwise, and therefore
+E
+
+X 2
+ij
+
+D
+12  1
+n C 02 
+
+1  1
+n
+
+D
+1
+n :
+When k ¤ j , the variables Xij and Xik are independent, and hence
+E ŒXijXik
+D
+E ŒXij E ŒXik
+D
+1
+n  1
+n
+D
+1
+n2 :
+Substituting these two expected values in equation (8.3), we obtain
+E
+
+n2
+i
+
+D
+n
+X
+jD1
+1
+n C
+X
+1jn
+X
+1kn
+k¤j
+1
+n2
+D
+n  1
+n C n.n  1/  1
+n2
+D
+1 C n  1
+n
+D
+2  1
+n ;
+which proves equation (8.2).
 
-#### Significance
-This theorem establishes that **Ω(n lg n)** is a fundamental lower bound for comparison-based sorting; no comparison sort can be asymptotically faster.
+204
+Chapter 8
+Sorting in Linear Time
+Using this expected value in equation (8.1), we conclude that the average-case
+running time for bucket sort is ‚.n/ C n  O.2  1=n/ D ‚.n/.
+Even if the input is not drawn from a uniform distribution, bucket sort may still
+run in linear time. As long as the input has the property that the sum of the squares
+of the bucket sizes is linear in the total number of elements, equation (8.1) tells us
+that bucket sort will run in linear time.
+Exercises
+8.4-1
+Using Figure 8.4 as a model, illustrate the operation of BUCKET-SORT on the array
+A D h:79; :13; :16; :64; :39; :20; :89; :53; :71; :42i.
+8.4-2
+Explain why the worst-case running time for bucket sort is ‚.n2/. What simple
+change to the algorithm preserves its linear average-case running time and makes
+its worst-case running time O.n lg n/?
+8.4-3
+Let X be a random variable that is equal to the number of heads in two ﬂips of a
+fair coin. What is E ŒX 2? What is E2 ŒX?
+8.4-4
+?
+We are given n points in the unit circle, pi D .xi; yi/, such that 0 < x2
+i C y2
+i  1
+for i D 1; 2; : : : ; n. Suppose that the points are uniformly distributed; that is, the
+probability of ﬁnding a point in any region of the circle is proportional to the area
+of that region. Design an algorithm with an average-case running time of ‚.n/ to
+sort the n points by their distances di D
+p
+x2
+i C y2
+i from the origin. (Hint: Design
+the bucket sizes in BUCKET-SORT to reﬂect the uniform distribution of the points
+in the unit circle.)
+8.4-5
+?
+A probability distribution function P.x/ for a random variable X is deﬁned
+by P.x/ D Pr fX  xg.
+Suppose that we draw a list of n random variables
+X1; X2; : : : ; Xn from a continuous probability distribution function P that is com-
+putable in O.1/ time. Give an algorithm that sorts these numbers in linear average-
+case time.
 
----
+Problems for Chapter 8
+205
+Problems
+8-1
+Probabilistic lower bounds on comparison sorting
+In this problem, we prove a probabilistic .n lg n/ lower bound on the running time
+of any deterministic or randomized comparison sort on n distinct input elements.
+We begin by examining a deterministic comparison sort A with decision tree TA.
+We assume that every permutation of A’s inputs is equally likely.
+a. Suppose that each leaf of TA is labeled with the probability that it is reached
+given a random input. Prove that exactly nŠ leaves are labeled 1=nŠ and that the
+rest are labeled 0.
+b. Let D.T / denote the external path length of a decision tree T ; that is, D.T /
+is the sum of the depths of all the leaves of T . Let T be a decision tree with
+k > 1 leaves, and let LT and RT be the left and right subtrees of T . Show that
+D.T / D D.LT/ C D.RT/ C k.
+c. Let d.k/ be the minimum value of D.T / over all decision trees T with k > 1
+leaves. Show that d.k/ D min1ik1 fd.i/ C d.k  i/ C kg. (Hint: Consider
+a decision tree T with k leaves that achieves the minimum. Let i0 be the number
+of leaves in LT and k  i0 the number of leaves in RT.)
+d. Prove that for a given value of k > 1 and i in the range 1  i  k  1, the
+function i lg i C .k  i/ lg.k  i/ is minimized at i D k=2. Conclude that
+d.k/ D .k lg k/.
+e. Prove that D.TA/ D .nŠ lg.nŠ//, and conclude that the average-case time to
+sort n elements is .n lg n/.
+Now, consider a randomized comparison sort B. We can extend the decision-
+tree model to handle randomization by incorporating two kinds of nodes: ordinary
+comparison nodes and “randomization” nodes. A randomization node models a
+random choice of the form RANDOM.1; r/ made by algorithm B; the node has r
+children, each of which is equally likely to be chosen during an execution of the
+algorithm.
+f. Show that for any randomized comparison sort B, there exists a deterministic
+comparison sort A whose expected number of comparisons is no more than
+those made by B.
 
-### Counting Sort
+206
+Chapter 8
+Sorting in Linear Time
+8-2
+Sorting in place in linear time
+Suppose that we have an array of n data records to sort and that the key of each
+record has the value 0 or 1. An algorithm for sorting such a set of records might
+possess some subset of the following three desirable characteristics:
+1. The algorithm runs in O.n/ time.
+2. The algorithm is stable.
+3. The algorithm sorts in place, using no more than a constant amount of storage
+space in addition to the original array.
+a. Give an algorithm that satisﬁes criteria 1 and 2 above.
+b. Give an algorithm that satisﬁes criteria 1 and 3 above.
+c. Give an algorithm that satisﬁes criteria 2 and 3 above.
+d. Can you use any of your sorting algorithms from parts (a)–(c) as the sorting
+method used in line 2 of RADIX-SORT, so that RADIX-SORT sorts n records
+with b-bit keys in O.bn/ time? Explain how or why not.
+e. Suppose that the n records have keys in the range from 1 to k. Show how to
+modify counting sort so that it sorts the records in place in O.n C k/ time. You
+may use O.k/ storage outside the input array. Is your algorithm stable? (Hint:
+How would you do it for k D 3?)
+8-3
+Sorting variable-length items
+a. You are given an array of integers, where different integers may have different
+numbers of digits, but the total number of digits over all the integers in the array
+is n. Show how to sort the array in O.n/ time.
+b. You are given an array of strings, where different strings may have different
+numbers of characters, but the total number of characters over all the strings
+is n. Show how to sort the strings in O.n/ time.
+(Note that the desired order here is the standard alphabetical order; for example,
+a < ab < b.)
+8-4
+Water jugs
+Suppose that you are given n red and n blue water jugs, all of different shapes and
+sizes. All red jugs hold different amounts of water, as do the blue ones. Moreover,
+for every red jug, there is a blue jug that holds the same amount of water, and vice
+versa.
 
-#### How It Works
-Counting Sort is a **non-comparison-based** algorithm that sorts integers by counting the frequency of each value. It uses these counts to place the integers into their correct positions in the sorted array.
+Problems for Chapter 8
+207
+Your task is to ﬁnd a grouping of the jugs into pairs of red and blue jugs that hold
+the same amount of water. To do so, you may perform the following operation: pick
+a pair of jugs in which one is red and one is blue, ﬁll the red jug with water, and
+then pour the water into the blue jug. This operation will tell you whether the red
+or the blue jug can hold more water, or that they have the same volume. Assume
+that such a comparison takes one time unit. Your goal is to ﬁnd an algorithm that
+makes a minimum number of comparisons to determine the grouping. Remember
+that you may not directly compare two red jugs or two blue jugs.
+a. Describe a deterministic algorithm that uses ‚.n2/ comparisons to group the
+jugs into pairs.
+b. Prove a lower bound of .n lg n/ for the number of comparisons that an algo-
+rithm solving this problem must make.
+c. Give a randomized algorithm whose expected number of comparisons is
+O.n lg n/, and prove that this bound is correct. What is the worst-case num-
+ber of comparisons for your algorithm?
+8-5
+Average sorting
+Suppose that, instead of sorting an array, we just require that the elements increase
+on average.
+More precisely, we call an n-element array A k-sorted if, for all
+i D 1; 2; : : : ; n  k, the following holds:
+PiCk1
+jDi
+AŒj 
+k
+
+PiCk
+jDiC1 AŒj 
+k
+:
+a. What does it mean for an array to be 1-sorted?
+b. Give a permutation of the numbers 1; 2; : : : ; 10 that is 2-sorted, but not sorted.
+c. Prove that an n-element array is k-sorted if and only if AŒi  AŒi C k for all
+i D 1; 2; : : : ; n  k.
+d. Give an algorithm that k-sorts an n-element array in O.n lg.n=k// time.
+We can also show a lower bound on the time to produce a k-sorted array, when k
+is a constant.
+e. Show that we can sort a k-sorted array of length n in O.n lg k/ time. (Hint:
+Use the solution to Exercise 6.5-9. )
+f. Show that when k is a constant, k-sorting an n-element array requires .n lg n/
+time. (Hint: Use the solution to the previous part along with the lower bound
+on comparison sorts.)
 
-**Conditions for Counting Sort**:
-- Input values fall within a known range **[0, k]**.
-- Convenient when **k = O(n)**.
+208
+Chapter 8
+Sorting in Linear Time
+8-6
+Lower bound on merging sorted lists
+The problem of merging two sorted lists arises frequently. We have seen a pro-
+cedure for it as the subroutine MERGE in Section 2.3.1. In this problem, we will
+prove a lower bound of 2n  1 on the worst-case number of comparisons required
+to merge two sorted lists, each containing n items.
+First we will show a lower bound of 2n  o.n/ comparisons by using a decision
+tree.
+a. Given 2n numbers, compute the number of possible ways to divide them into
+two sorted lists, each with n numbers.
+b. Using a decision tree and your answer to part (a), show that any algorithm that
+correctly merges two sorted lists must perform at least 2n  o.n/ comparisons.
+Now we will show a slightly tighter 2n  1 bound.
+c. Show that if two elements are consecutive in the sorted order and from different
+lists, then they must be compared.
+d. Use your answer to the previous part to show a lower bound of 2n  1 compar-
+isons for merging two sorted lists.
+8-7
+The 0-1 sorting lemma and columnsort
+A compare-exchange operation on two array elements AŒi and AŒj , where i < j ,
+has the form
+COMPARE-EXCHANGE.A; i; j /
+1
+if AŒi > AŒj 
+2
+exchange AŒi with AŒj 
+After the compare-exchange operation, we know that AŒi  AŒj .
+An oblivious compare-exchange algorithm operates solely by a sequence of
+prespeciﬁed compare-exchange operations. The indices of the positions compared
+in the sequence must be determined in advance, and although they can depend
+on the number of elements being sorted, they cannot depend on the values being
+sorted, nor can they depend on the result of any prior compare-exchange operation.
+For example, here is insertion sort expressed as an oblivious compare-exchange
+algorithm:
+INSERTION-SORT.A/
+1
+for j D 2 to A:length
+2
+for i D j  1 downto 1
+3
+COMPARE-EXCHANGE.A; i; i C 1/
 
-#### Steps in Counting Sort:
-1. Count occurrences of each input value using an auxiliary array.
-2. Compute the cumulative sum of these counts to determine the positions of elements.
-3. Place each element into the sorted output array using its position information.
+Problems for Chapter 8
+209
+The 0-1 sorting lemma provides a powerful way to prove that an oblivious
+compare-exchange algorithm produces a sorted result. It states that if an oblivi-
+ous compare-exchange algorithm correctly sorts all input sequences consisting of
+only 0s and 1s, then it correctly sorts all inputs containing arbitrary values.
+You will prove the 0-1 sorting lemma by proving its contrapositive: if an oblivi-
+ous compare-exchange algorithm fails to sort an input containing arbitrary values,
+then it fails to sort some 0-1 input. Assume that an oblivious compare-exchange al-
+gorithm X fails to correctly sort the array AŒ1 : : n. Let AŒp be the smallest value
+in A that algorithm X puts into the wrong location, and let AŒq be the value that
+algorithm X moves to the location into which AŒp should have gone. Deﬁne an
+array BŒ1 : : n of 0s and 1s as follows:
+BŒi D
+(
+0
+if AŒi  AŒp ;
+1
+if AŒi > AŒp :
+a. Argue that AŒq > AŒp, so that BŒp D 0 and BŒq D 1.
+b. To complete the proof of the 0-1 sorting lemma, prove that algorithm X fails to
+sort array B correctly.
+Now you will use the 0-1 sorting lemma to prove that a particular sorting algo-
+rithm works correctly. The algorithm, columnsort, works on a rectangular array
+of n elements. The array has r rows and s columns (so that n D rs), subject to
+three restrictions:
+
+r must be even,
+
+s must be a divisor of r, and
+
+r  2s2.
+When columnsort completes, the array is sorted in column-major order: reading
+down the columns, from left to right, the elements monotonically increase.
+Columnsort operates in eight steps, regardless of the value of n. The odd steps
+are all the same: sort each column individually. Each even step is a ﬁxed permuta-
+tion. Here are the steps:
+1. Sort each column.
+2. Transpose the array, but reshape it back to r rows and s columns. In other
+words, turn the leftmost column into the top r=s rows, in order; turn the next
+column into the next r=s rows, in order; and so on.
+3. Sort each column.
+4. Perform the inverse of the permutation performed in step 2.
 
-#### Pseudocode: Counting Sort
-```pseudo
-COUNTING-SORT(A, B, k)
-1. Let C[0:k] be a new array, initialized to 0
-2. for i = 0 to k
-       C[i] = 0
-3. for j = 1 to A.length
-       C[A[j]] = C[A[j]] + 1
-4. for i = 1 to k
-       C[i] = C[i] + C[i - 1]
-5. for j = A.length downto 1
-       B[C[A[j]]] = A[j]
-       C[A[j]] = C[A[j]] - 1
-```
+210
+Chapter 8
+Sorting in Linear Time
+10
+14
+5
+8
+7
+17
+12
+1
+6
+16
+9
+11
+4
+15
+2
+18
+3
+13
+(a)
+4
+1
+2
+8
+3
+5
+10
+7
+6
+12
+9
+11
+16
+14
+13
+18
+15
+17
+(b)
+4
+8
+10
+12
+16
+18
+1
+3
+7
+9
+14
+15
+2
+5
+6
+11
+13
+17
+(c)
+1
+3
+6
+2
+5
+7
+4
+8
+10
+9
+13
+15
+11
+14
+17
+12
+16
+18
+(d)
+1
+4
+11
+3
+8
+14
+6
+10
+17
+2
+9
+12
+5
+13
+16
+7
+15
+18
+(e)
+1
+4
+11
+2
+8
+12
+3
+9
+14
+5
+10
+16
+6
+13
+17
+7
+15
+18
+(f)
+5
+10
+16
+6
+13
+17
+7
+15
+18
+1
+4
+11
+2
+8
+12
+3
+9
+14
+(g)
+4
+10
+16
+5
+11
+17
+6
+12
+18
+1
+7
+13
+2
+8
+14
+3
+9
+15
+(h)
+1
+7
+13
+2
+8
+14
+3
+9
+15
+4
+10
+16
+5
+11
+17
+6
+12
+18
+(i)
+Figure 8.5
+The steps of columnsort. (a) The input array with 6 rows and 3 columns. (b) After
+sorting each column in step 1. (c) After transposing and reshaping in step 2. (d) After sorting each
+column in step 3. (e) After performing step 4, which inverts the permutation from step 2. (f) After
+sorting each column in step 5. (g) After shifting by half a column in step 6. (h) After sorting each
+column in step 7. (i) After performing step 8, which inverts the permutation from step 6. The array
+is now sorted in column-major order.
+5. Sort each column.
+6. Shift the top half of each column into the bottom half of the same column, and
+shift the bottom half of each column into the top half of the next column to the
+right. Leave the top half of the leftmost column empty. Shift the bottom half
+of the last column into the top half of a new rightmost column, and leave the
+bottom half of this new column empty.
+7. Sort each column.
+8. Perform the inverse of the permutation performed in step 6.
+Figure 8.5 shows an example of the steps of columnsort with r D 6 and s D 3.
+(Even though this example violates the requirement that r  2s2, it happens to
+work.)
+c. Argue that we can treat columnsort as an oblivious compare-exchange algo-
+rithm, even if we do not know what sorting method the odd steps use.
+Although it might seem hard to believe that columnsort actually sorts, you will
+use the 0-1 sorting lemma to prove that it does. The 0-1 sorting lemma applies
+because we can treat columnsort as an oblivious compare-exchange algorithm. A
 
-#### Time Complexity
-| Step                          | Time Complexity |
-|-------------------------------|-----------------|
-| Initialization and frequency count | **O(n + k)**        |
-| Cumulative sum computation    | **O(k)**             |
-| Sorting the output            | **O(n)**             |
+Notes for Chapter 8
+211
+couple of deﬁnitions will help you apply the 0-1 sorting lemma. We say that an area
+of an array is clean if we know that it contains either all 0s or all 1s. Otherwise,
+the area might contain mixed 0s and 1s, and it is dirty. From here on, assume that
+the input array contains only 0s and 1s, and that we can treat it as an array with r
+rows and s columns.
+d. Prove that after steps 1–3, the array consists of some clean rows of 0s at the top,
+some clean rows of 1s at the bottom, and at most s dirty rows between them.
+e. Prove that after step 4, the array, read in column-major order, starts with a clean
+area of 0s, ends with a clean area of 1s, and has a dirty area of at most s2
+elements in the middle.
+f. Prove that steps 5–8 produce a fully sorted 0-1 output. Conclude that column-
+sort correctly sorts all inputs containing arbitrary values.
+g. Now suppose that s does not divide r. Prove that after steps 1–3, the array
+consists of some clean rows of 0s at the top, some clean rows of 1s at the
+bottom, and at most 2s  1 dirty rows between them. How large must r be,
+compared with s, for columnsort to correctly sort when s does not divide r?
+h. Suggest a simple change to step 1 that allows us to maintain the requirement
+that r  2s2 even when s does not divide r, and prove that with your change,
+columnsort correctly sorts.
+Chapter notes
+The decision-tree model for studying comparison sorts was introduced by Ford
+and Johnson [110]. Knuth’s comprehensive treatise on sorting [211] covers many
+variations on the sorting problem, including the information-theoretic lower bound
+on the complexity of sorting given here. Ben-Or [39] studied lower bounds for
+sorting using generalizations of the decision-tree model.
+Knuth credits H. H. Seward with inventing counting sort in 1954, as well as with
+the idea of combining counting sort with radix sort. Radix sorting starting with the
+least signiﬁcant digit appears to be a folk algorithm widely used by operators of
+mechanical card-sorting machines. According to Knuth, the ﬁrst published refer-
+ence to the method is a 1929 document by L. J. Comrie describing punched-card
+equipment. Bucket sorting has been in use since 1956, when the basic idea was
+proposed by E. J. Isaac and R. C. Singleton [188].
+Munro and Raman [263] give a stable sorting algorithm that performs O.n1C/
+comparisons in the worst case, where 0 <   1 is any ﬁxed constant. Although
 
-**Overall**: **O(n + k)**  
-When **k = O(n)**, Counting Sort runs in **O(n)** time.
-
-#### Example
-Input: `A = [2, 5, 3, 0, 2, 3, 0, 3]`, `k = 5`  
-Intermediate arrays during computation:
-- Frequency array `C[i]`: `[2, 0, 2, 3, 0, 1]`
-- Cumulative count: `[2, 2, 4, 7, 7, 8]`
-- Result after sorting: `[0, 0, 2, 2, 3, 3, 3, 5]`
-
-#### Properties
-- Stable: Uses cumulative counts to maintain relative order of elements with the same value.
-- Efficient: Best suited for integer sorting in a limited range.
-
----
-
-### Complexity Analysis
-
-| Algorithm       | Best Case   | Worst Case  | Space Complexity | Stable?       |
-|-----------------|-------------|-------------|-------------------|---------------|
-| Merge Sort      | O(n lg n)   | O(n lg n)   | O(n)             | Yes           |
-| Heap Sort       | O(n lg n)   | O(n lg n)   | O(1)             | No            |
-| Counting Sort   | O(n + k)    | O(n + k)    | O(n + k)         | Yes           |
-| QuickSort       | O(n lg n)   | O(n^2)      | O(log n) (avg)   | No            |
-
----
-
-## Additional Exercises and Theorems
-
-### Exercise 8.1-1
-Using **Counting Sort**, sort input `A = [6, 0, 2, 0, 1, 3, 4, 6, 1, 3, 2]` with `k = 6`.  
-Solution steps will resemble the example provided above.
-
-### Corollary 8.2
-- **Heapsort** and **Merge Sort** are asymptotically optimal comparison-based sort algorithms because they achieve the lower bound of **O(n lg n)**.
-
----
-
-## Conclusion
-This chapter highlights the limitations of comparison-based sorting algorithms and introduces non-comparison-based alternatives that can achieve optimal linear time under specific constraints. The decision tree model serves as the theoretical foundation for understanding these limitations. Algorithms like Counting Sort demonstrate how leveraging input structure can bypass the **Ω(n lg n)** bound.
-```
+212
+Chapter 8
+Sorting in Linear Time
+any of the O.n lg n/-time algorithms make fewer comparisons, the algorithm by
+Munro and Raman moves data only O.n/ times and operates in place.
+The case of sorting n b-bit integers in o.n lg n/ time has been considered by
+many researchers. Several positive results have been obtained, each under slightly
+different assumptions about the model of computation and the restrictions placed
+on the algorithm. All the results assume that the computer memory is divided into
+addressable b-bit words. Fredman and Willard [115] introduced the fusion tree data
+structure and used it to sort n integers in O.n lg n= lg lg n/ time. This bound was
+later improved to O.n
+p
+lg n/ time by Andersson [16]. These algorithms require
+the use of multiplication and several precomputed constants. Andersson, Hagerup,
+Nilsson, and Raman [17] have shown how to sort n integers in O.n lg lg n/ time
+without using multiplication, but their method requires storage that can be un-
+bounded in terms of n. Using multiplicative hashing, we can reduce the storage
+needed to O.n/, but then the O.n lg lg n/ worst-case bound on the running time
+becomes an expected-time bound. Generalizing the exponential search trees of
+Andersson [16], Thorup [335] gave an O.n.lg lg n/2/-time sorting algorithm that
+does not use multiplication or randomization, and it uses linear space. Combining
+these techniques with some new ideas, Han [158] improved the bound for sorting
+to O.n lg lg n lg lg lg n/ time. Although these algorithms are important theoretical
+breakthroughs, they are all fairly complicated and at the present time seem unlikely
+to compete with existing sorting algorithms in practice.
+The columnsort algorithm in Problem 8-7 is by Leighton [227].
