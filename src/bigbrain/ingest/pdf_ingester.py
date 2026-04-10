@@ -2,8 +2,10 @@
 
 Supports three extraction modes controlled by ``pdf_mode`` in config or CLI:
 
-- ``standard`` – PyMuPDF text extraction + Tesseract OCR for scanned pages.
-  Pages with little/no embedded text are rendered to images and OCR'd.
+- ``standard`` – PyMuPDF text extraction with image-aware OCR.  Pages are
+  classified as scanned, digital-with-figures, or pure-text.  Scanned pages
+  get full-page OCR; figures in digital pages are individually extracted and
+  OCR'd for axis labels, legends, and diagram text.
 - ``high_fidelity`` – marker-pdf.  Markdown output with LaTeX math, tables,
   figures.  Requires ``pip install 'bigbrain[marker]'``.
 - ``max_accuracy`` – chandra-ocr.  Highest benchmark scores for math/tables.
@@ -12,10 +14,12 @@ Supports three extraction modes controlled by ``pdf_mode`` in config or CLI:
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from bigbrain.ingest.registry import BaseIngester
 from bigbrain.kb.models import Document, DocumentSection, SourceMetadata
@@ -31,8 +35,18 @@ VALID_PDF_MODES = ("standard", "high_fidelity", "max_accuracy")
 _JUNK_LINE_RE = re.compile(r"^[\s\W]{4,}$")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
-# Pages with fewer than this many non-whitespace chars trigger OCR
+# Pages with fewer than this many non-whitespace chars are "sparse"
 _OCR_MIN_CHARS = 20
+# Images covering ≥5% of the page are "significant" (same as pymupdf4llm)
+_IMG_MIN_COVERAGE = 0.05
+# Scanned pages: images cover ≥50% and text is sparse
+_SCANNED_IMG_COVERAGE = 0.50
+# Minimum image dimensions (pixels) to bother OCR'ing
+_IMG_MIN_OCR_SIZE = 100
+# Maximum images to process per page (avoid pathological cases)
+_MAX_IMAGES_PER_PAGE = 30
+# Caption search distance in points below image
+_CAPTION_SEARCH_DISTANCE = 40
 
 # Runtime pdf_mode — set by ingest_path() from config/CLI before calling ingest()
 _active_pdf_mode: str = "standard"
@@ -117,6 +131,129 @@ def _split_markdown_sections(markdown: str) -> list[DocumentSection]:
     return sections
 
 
+def _classify_page(page: object, text: str) -> tuple[str, list[dict]]:
+    """Classify a PDF page based on text content and embedded images.
+
+    Returns
+    -------
+    tuple[str, list[dict]]
+        (page_type, significant_images) where page_type is one of:
+        - ``"scanned"`` — images dominate, text is sparse → full-page OCR
+        - ``"digital_with_images"`` — text present + significant figures
+        - ``"text_only"`` — enough text, no significant images
+        - ``"blank"`` — no text, no images
+    """
+    text_chars = len(text.replace(" ", "").replace("\n", ""))
+
+    try:
+        page_rect = page.rect  # type: ignore[union-attr]
+        page_area = page_rect.width * page_rect.height
+    except Exception:
+        page_area = 0
+
+    if page_area <= 0:
+        return ("text_only" if text_chars >= _OCR_MIN_CHARS else "blank", [])
+
+    # Get image metadata with bounding boxes
+    try:
+        image_info_list = page.get_image_info()  # type: ignore[union-attr]
+    except Exception:
+        image_info_list = []
+
+    # Filter to significant images (≥5% page area, capped at 30)
+    significant: list[dict] = []
+    total_image_area = 0.0
+    for info in image_info_list:
+        bbox = info.get("bbox", None)
+        if bbox is None:
+            continue
+        try:
+            if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                w = abs(bbox[2] - bbox[0])
+                h = abs(bbox[3] - bbox[1])
+            else:
+                w = abs(bbox.width)
+                h = abs(bbox.height)
+        except Exception:
+            continue
+
+        area = w * h
+        if area <= 0:
+            continue
+        total_image_area += area
+
+        if area / page_area >= _IMG_MIN_COVERAGE:
+            significant.append(info)
+            if len(significant) >= _MAX_IMAGES_PER_PAGE:
+                break
+
+    image_coverage = total_image_area / page_area
+
+    if text_chars < _OCR_MIN_CHARS and image_coverage >= _SCANNED_IMG_COVERAGE:
+        return ("scanned", [])
+    elif text_chars < _OCR_MIN_CHARS and not significant:
+        return ("blank", [])
+    elif text_chars >= _OCR_MIN_CHARS and significant:
+        return ("digital_with_images", significant)
+    elif text_chars < _OCR_MIN_CHARS and significant:
+        # Sparse text but has a few figures — treat as scanned
+        return ("scanned", [])
+    else:
+        return ("text_only", [])
+
+
+def _find_caption(page: object, image_bbox: Any) -> str:
+    """Find caption text immediately below an image bounding box.
+
+    Looks for text blocks within ``_CAPTION_SEARCH_DISTANCE`` points below
+    the image that are horizontally aligned.  Returns the first match or
+    empty string.
+    """
+    try:
+        blocks = page.get_text("blocks")  # type: ignore[union-attr]
+    except Exception:
+        return ""
+
+    if isinstance(image_bbox, (list, tuple)) and len(image_bbox) >= 4:
+        img_x0, img_y0, img_x1, img_y1 = image_bbox[0], image_bbox[1], image_bbox[2], image_bbox[3]
+    else:
+        try:
+            img_x0, img_y0, img_x1, img_y1 = image_bbox.x0, image_bbox.y0, image_bbox.x1, image_bbox.y1
+        except Exception:
+            return ""
+
+    img_width = abs(img_x1 - img_x0)
+
+    for block in blocks:
+        if not isinstance(block, (list, tuple)) or len(block) < 6:
+            continue
+        # block[-1] == 0 means text block
+        if block[-1] != 0:
+            continue
+
+        bx0, by0, bx1, by1 = block[0], block[1], block[2], block[3]
+        text = block[4] if len(block) > 4 else ""
+
+        # Must be below the image, within search distance
+        gap = by0 - img_y1
+        if gap < 0 or gap > _CAPTION_SEARCH_DISTANCE:
+            continue
+
+        # Must be horizontally overlapping with the image
+        if bx1 < img_x0 - 20 or bx0 > img_x1 + 20:
+            continue
+
+        text = str(text).strip()
+        if text:
+            # Truncate long text to first line (captions are short)
+            first_line = text.split("\n")[0].strip()
+            if len(first_line) > 200:
+                first_line = first_line[:200] + "..."
+            return first_line
+
+    return ""
+
+
 class PdfIngester(BaseIngester):
     """PDF ingester with configurable extraction backends.
 
@@ -162,7 +299,9 @@ class PdfIngester(BaseIngester):
 
         pages: list[DocumentSection] = []
         all_text_parts: list[str] = []
-        ocr_pages = 0
+        ocr_page_count = 0
+        total_images_found = 0
+        total_images_ocrd = 0
 
         for i, page in enumerate(doc):
             try:
@@ -172,16 +311,38 @@ class PdfIngester(BaseIngester):
                 logger.warning("Failed to extract page %d of %s: %s", i + 1, path, exc)
                 text = ""
 
-            # OCR fallback: if embedded text is sparse, render page and OCR
-            if len(text.replace(" ", "").replace("\n", "")) < _OCR_MIN_CHARS:
+            page_type, sig_images = _classify_page(page, text)
+            meta: dict[str, Any] = {"page_number": i + 1, "page_type": page_type}
+
+            if page_type == "scanned":
+                # Full-page OCR for scanned pages
                 ocr_text = self._ocr_page(page, i + 1, path)
                 if ocr_text:
                     text = ocr_text
-                    ocr_pages += 1
+                    ocr_page_count += 1
+                    meta["ocr"] = True
 
-            meta: dict = {"page_number": i + 1}
-            if ocr_pages and len(text.replace(" ", "").replace("\n", "")) >= _OCR_MIN_CHARS:
-                meta["ocr"] = True
+            elif page_type == "digital_with_images":
+                # Extract and OCR individual figures
+                image_results = self._extract_and_ocr_images(
+                    doc, page, sig_images, i + 1, path,
+                )
+                total_images_found += len(sig_images)
+                if image_results:
+                    img_text_parts: list[str] = []
+                    img_meta_list: list[dict] = []
+                    for img_info in image_results:
+                        if img_info.get("ocr_text"):
+                            total_images_ocrd += 1
+                            caption = img_info.get("caption", "")
+                            label = caption or f"Figure on page {i + 1}"
+                            img_text_parts.append(
+                                f"\n[{label}]: {img_info['ocr_text']}"
+                            )
+                        img_meta_list.append(img_info)
+                    if img_text_parts:
+                        text = text + "\n" + "\n".join(img_text_parts)
+                    meta["images"] = img_meta_list
 
             pages.append(DocumentSection(
                 title=f"Page {i + 1}",
@@ -200,9 +361,12 @@ class PdfIngester(BaseIngester):
         title = pdf_meta.get("pdf_title", "") or path.stem.replace("_", " ").replace("-", " ").title()
         stat = path.stat()
 
-        extra = {**pdf_meta, "pdf_mode": "standard"}
-        if ocr_pages:
-            extra["ocr_pages"] = str(ocr_pages)
+        extra: dict[str, Any] = {**pdf_meta, "pdf_mode": "standard"}
+        if ocr_page_count:
+            extra["ocr_pages"] = str(ocr_page_count)
+        if total_images_found:
+            extra["images_found"] = str(total_images_found)
+            extra["images_ocrd"] = str(total_images_ocrd)
 
         return Document(
             title=title,
@@ -217,7 +381,13 @@ class PdfIngester(BaseIngester):
             ),
             language="",
             sections=pages,
-            metadata={"page_count": len(pages), "ocr_pages": ocr_pages, **pdf_meta},
+            metadata={
+                "page_count": len(pages),
+                "ocr_pages": ocr_page_count,
+                "images_found": total_images_found,
+                "images_ocrd": total_images_ocrd,
+                **pdf_meta,
+            },
         )
 
     def _ingest_pypdf(self, path: Path) -> Document:
@@ -406,6 +576,94 @@ class PdfIngester(BaseIngester):
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_and_ocr_images(
+        doc: object,
+        page: object,
+        sig_images: list[dict],
+        page_num: int,
+        path: Path,
+    ) -> list[dict[str, Any]]:
+        """Extract significant images from a page and OCR them.
+
+        Returns a list of dicts with keys: xref, width, height,
+        page_coverage, caption, ocr_text, saved_path (if saved).
+        """
+        if not _is_tesseract_available():
+            # Still collect image metadata even without OCR
+            results: list[dict[str, Any]] = []
+            for info in sig_images:
+                results.append({
+                    "width": info.get("width", 0),
+                    "height": info.get("height", 0),
+                    "xref": info.get("xref", 0),
+                })
+            return results
+
+        try:
+            import pytesseract
+            from PIL import Image
+        except ImportError:
+            return []
+
+        results = []
+        for info in sig_images:
+            xref = info.get("xref", 0)
+            if not xref:
+                continue
+
+            entry: dict[str, Any] = {
+                "xref": xref,
+                "width": info.get("width", 0),
+                "height": info.get("height", 0),
+            }
+
+            # Try caption extraction
+            bbox = info.get("bbox")
+            if bbox:
+                caption = _find_caption(page, bbox)
+                if caption:
+                    entry["caption"] = caption
+
+            # Extract and OCR the image
+            try:
+                img_data = doc.extract_image(xref)  # type: ignore[union-attr]
+                img_bytes = img_data["image"]
+                img = Image.open(io.BytesIO(img_bytes))
+
+                # Only OCR images large enough to contain readable text
+                if img.width >= _IMG_MIN_OCR_SIZE and img.height >= _IMG_MIN_OCR_SIZE:
+                    ocr_text = pytesseract.image_to_string(img).strip()
+                    ocr_text = _clean_page_text(ocr_text)
+                    if ocr_text and len(ocr_text) > 5:
+                        entry["ocr_text"] = ocr_text
+                        logger.debug(
+                            "OCR extracted %d chars from image xref=%d on page %d of %s",
+                            len(ocr_text), xref, page_num, path,
+                        )
+
+                # Save image to data/images/<doc_hash>/
+                try:
+                    doc_hash = hashlib.md5(str(path).encode()).hexdigest()[:12]
+                    img_dir = Path("data") / "images" / doc_hash
+                    img_dir.mkdir(parents=True, exist_ok=True)
+                    ext = img_data.get("ext", "png")
+                    img_path = img_dir / f"page{page_num}_img{xref}.{ext}"
+                    img_path.write_bytes(img_bytes)
+                    entry["saved_path"] = str(img_path)
+                except Exception as exc:
+                    logger.debug("Failed to save image xref=%d: %s", xref, exc)
+
+            except Exception as exc:
+                logger.debug(
+                    "Failed to extract/OCR image xref=%d on page %d: %s",
+                    xref, page_num, exc,
+                )
+
+            results.append(entry)
+
+        return results
+
     @staticmethod
     def _ocr_page(page: object, page_num: int, path: Path) -> str:
         """Render a PyMuPDF page to image and run Tesseract OCR.
