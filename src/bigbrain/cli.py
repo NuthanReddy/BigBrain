@@ -1414,6 +1414,88 @@ def _add_compile_parser(subparsers: argparse._SubParsersAction) -> argparse.Argu
     return p
 
 
+def _handle_digest(args: argparse.Namespace) -> int:
+    """Generate rich chapter-by-chapter study notes from KB data."""
+    from bigbrain.config import load_config
+    from pathlib import Path
+
+    cfg = load_config()
+    db_path = cfg.kb_db_path
+
+    if not Path(db_path).exists():
+        print("Knowledge base is empty. Run 'bigbrain ingest' first.")
+        return 1
+
+    from bigbrain.digest.builder import DigestBuilder
+
+    doc_id = args.doc_id
+    if not doc_id:
+        print("Error: --doc-id is required. Use 'bigbrain status' to find document IDs.")
+        return 1
+
+    # Resolve prefix
+    from bigbrain.kb.store import KBStore
+    with KBStore(db_path) as store:
+        full_id = _resolve_doc_id(store, doc_id)
+        if full_id:
+            doc_id = full_id
+
+    model = args.model or ""
+    force = args.force
+    output = args.output or "digest"
+
+    print(f"Generating digest for {doc_id}...")
+    if model:
+        print(f"  Model: {model}")
+
+    with DigestBuilder.from_config(cfg) as builder:
+        builder._output_dir = Path(output)
+        result = builder.build(doc_id, model=model, force=force)
+
+    print()
+    print(f"Digest complete:")
+    print(f"  Written:  {result.written}")
+    print(f"  Skipped:  {result.skipped}")
+    if result.errors:
+        print(f"  Errors:   {len(result.errors)}")
+        for err in result.errors[:5]:
+            print(f"    - {err}")
+    if result.output_dir:
+        print(f"  Output:   {result.output_dir}")
+    return 0
+
+
+def _add_digest_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    """Register the ``digest`` subcommand."""
+    p = subparsers.add_parser(
+        "digest",
+        help="Generate rich study notes per chapter/section",
+        description=(
+            "Generate comprehensive chapter-by-chapter study notes from "
+            "KB data. Each chunk/section becomes a detailed markdown file "
+            "in digest/<doc-title>/."
+        ),
+    )
+    p.add_argument(
+        "--doc-id", type=str, required=True,
+        help="Document ID to generate digest for (use prefix)",
+    )
+    p.add_argument(
+        "--model", type=str, default="",
+        help="Override AI model (default: config default)",
+    )
+    p.add_argument(
+        "--force", action="store_true", default=False,
+        help="Regenerate even if output files exist",
+    )
+    p.add_argument(
+        "--output", "-o", type=str, default="digest",
+        help="Output directory (default: digest/)",
+    )
+    p.set_defaults(func=_handle_digest)
+    return p
+
+
 def _add_update_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Register the ``update`` subcommand."""
     p = subparsers.add_parser(
@@ -2456,6 +2538,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_entities_parser(subparsers)
     _add_compact_parser(subparsers)
     _add_compile_parser(subparsers)
+    _add_digest_parser(subparsers)
     _add_update_parser(subparsers)
     _add_status_parser(subparsers)
     _add_kb_search_parser(subparsers)
