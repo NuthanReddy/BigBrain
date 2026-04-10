@@ -38,10 +38,11 @@ providers:
     # Authentication: run 'bigbrain auth login' (OAuth device flow).
     # Token is cached at ~/.bigbrain/github_token.json — no env var needed.
     base_url: "https://api.githubcopilot.com"
-    default_model: "claude-opus-4.6"
-    timeout: 240
+    default_model: "gpt-4o"
+    timeout: 120
     max_retries: 5
-    retry_delay: 5.0
+    retry_delay: 2.0          # base delay for exponential backoff on errors
+    request_delay: 0.5        # seconds between every request (rate limit throttle)
 
 # Ingestion settings (Phase 1)
 ingestion:

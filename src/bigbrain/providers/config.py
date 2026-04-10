@@ -33,9 +33,10 @@ class GitHubCopilotConfig:
     api_token: str = ""
     base_url: str = "https://api.githubcopilot.com"
     default_model: str = "gpt-4o"
-    timeout: int = 60
+    timeout: int = 120
     max_retries: int = 5
     retry_delay: float = 2.0  # base seconds between retries (exponential backoff)
+    request_delay: float = 1.0  # seconds to wait between every request (throttle)
 
 
 @dataclass

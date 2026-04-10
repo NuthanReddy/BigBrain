@@ -151,7 +151,8 @@ class DistillPipeline:
             self._store.save_chunks(chunks)
             return result
 
-        # Step 2: Summarize + Extract entities in parallel
+        # Step 2: Summarize, then extract entities (sequential to avoid
+        # flooding the API with concurrent requests and hitting rate limits)
         do_summarize = "summarize" in steps
         do_entities = "entities" in steps and self._config.entity_extraction
 
@@ -161,29 +162,20 @@ class DistillPipeline:
             existing = self.entity_store.get_entities(doc.id)
             existing_names = {" ".join(e.name.lower().strip().split()) for e in existing}
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            summary_future = None
-            entity_future = None
+        if do_summarize:
+            summaries, sum_errors = self._run_summarize(doc, model)
+            result.summaries = summaries
+            result.errors.extend(sum_errors)
+            if summaries:
+                result.provider = summaries[0].generated_by_provider
+                result.model = summaries[0].generated_by_model
 
-            if do_summarize:
-                summary_future = pool.submit(self._run_summarize, doc, model)
-            if do_entities:
-                entity_future = pool.submit(
-                    self._run_entity_extraction, chunks_to_process, model, existing_names,
-                )
-
-            if summary_future is not None:
-                summaries, sum_errors = summary_future.result()
-                result.summaries = summaries
-                result.errors.extend(sum_errors)
-                if summaries:
-                    result.provider = summaries[0].generated_by_provider
-                    result.model = summaries[0].generated_by_model
-
-            if entity_future is not None:
-                entities, ent_errors = entity_future.result()
-                result.entities = entities
-                result.errors.extend(ent_errors)
+        if do_entities:
+            entities, ent_errors = self._run_entity_extraction(
+                chunks_to_process, model, existing_names,
+            )
+            result.entities = entities
+            result.errors.extend(ent_errors)
 
         # Step 3: Build relationships
         do_relationships = "relationships" in steps and self._config.relationship_extraction
