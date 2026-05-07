@@ -168,6 +168,11 @@ These should apply across all phases:
 | 8 | Extended ingestion and study outputs | PPT, OCR, web, cheatsheets, flashcards, Q&A | 🟡 Medium |
 | 9 | Audio and rich UX | Podcast scripts/audio, dashboard | 🟢 Future |
 | 10 | Hardening and release readiness | tests, docs, packaging, versioning | 🔴 Critical |
+| 11 | Polyglot entity store | Selectable distilled entity/vector backends across SQLite, Postgres, Neo4j, Qdrant, Weaviate, and Pinecone | 🟠 High |
+| 12 | LLM wiki | Auto-generated interlinked markdown wiki with wikilinks and YAML frontmatter | 🟠 High |
+| 13 | Embedding model integration | Replace hash-based placeholder vectors with real local/cloud embeddings | 🟠 High |
+| 14 | RAG-vector hybrid retrieval | Connect RAG to entity-store backends for hybrid FTS5 + vector retrieval | 🟠 High |
+| 15 | Advanced search and analytics | Entity graph traversal, cross-document relationship queries, semantic search dashboard | 🟢 Future |
 
 ---
 

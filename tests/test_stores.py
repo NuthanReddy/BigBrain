@@ -275,9 +275,21 @@ class TestPostgresBackend:
         backend._conn = mock_conn
         backend._ensure_schema()
 
-        sql_calls = [str(c) for c in mock_cursor.execute.call_args_list]
-        create_calls = [s for s in sql_calls if "CREATE TABLE" in s]
+        sql_calls = [call.args[0] for call in mock_cursor.execute.call_args_list]
+        assert any(
+            "CREATE EXTENSION IF NOT EXISTS vector" in sql for sql in sql_calls
+        )
+        create_calls = [sql for sql in sql_calls if "CREATE TABLE" in sql]
         assert len(create_calls) >= 2, "Should create bb_entities and bb_relationships tables"
+        assert any(
+            "ALTER TABLE bb_entities ADD COLUMN IF NOT EXISTS embedding vector(384)" in sql
+            for sql in sql_calls
+        )
+        assert any(
+            "CREATE INDEX IF NOT EXISTS idx_bb_entities_embedding" in sql
+            and "USING hnsw" in sql
+            for sql in sql_calls
+        )
 
     def test_save_entities_executes_upsert(self):
         from bigbrain.stores.postgres import PostgresBackend
@@ -338,6 +350,46 @@ class TestPostgresBackend:
 
         sql = mock_cursor.execute.call_args_list[0][0][0]
         assert "DELETE FROM bb_entities" in sql
+
+    def test_search_similar_uses_pgvector_when_available(self):
+        from bigbrain.stores.postgres import PostgresBackend
+
+        mock_conn = MagicMock()
+        mock_conn.closed = False
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            (
+                "e1",
+                "doc-1",
+                "BST",
+                "data_structure",
+                "Binary search tree",
+                "",
+                "",
+                "",
+                "{}",
+            )
+        ]
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        backend = PostgresBackend("postgresql://localhost/test")
+        backend._conn = mock_conn
+        backend._has_vector = True
+
+        results = backend.search_similar(
+            "binary tree", limit=3, entity_type="data_structure"
+        )
+
+        assert len(results) == 1
+        assert results[0].name == "BST"
+
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "ORDER BY embedding <=> %s::vector" in sql
+        assert "entity_type=%s" in sql
+        assert params[0] == "data_structure"
+        assert len(params[1]) == 384
+        assert params[2] == 3
 
 
 # ===========================================================================

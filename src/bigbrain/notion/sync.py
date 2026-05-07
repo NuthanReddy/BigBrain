@@ -114,22 +114,33 @@ class SyncEngine:
         )
         return result
 
-    def import_pages(self, query: str = "", max_pages: int = 20) -> SyncResult:
-        """Import Notion pages into KB (import-only mode)."""
-        result = SyncResult()
-        pages = self._client.search_pages(query=query, page_size=max_pages)
+    def import_pages(self, query: str = "", max_pages: int = 20, parent_page_id: str = "") -> SyncResult:
+        """Import Notion pages into KB.
 
-        for page in pages:
-            page_id = page["id"]
-            try:
-                doc = self._importer.import_page(page_id)
-                if doc:
-                    result.imported += 1
-                else:
-                    result.skipped += 1
-            except Exception as exc:
-                logger.warning("Failed to import page %s: %s", page_id, exc)
-                result.errors.append(f"{page_id}: {exc}")
+        If parent_page_id is set, only imports child pages under that parent.
+        """
+        result = SyncResult()
+
+        if parent_page_id:
+            # Import only children of the specified parent
+            docs = self._importer.import_search(
+                query=query, max_pages=max_pages, parent_page_id=parent_page_id,
+            )
+            for doc in docs:
+                result.imported += 1
+        else:
+            pages = self._client.search_pages(query=query, page_size=max_pages)
+            for page in pages:
+                page_id = page["id"]
+                try:
+                    doc = self._importer.import_page(page_id)
+                    if doc:
+                        result.imported += 1
+                    else:
+                        result.skipped += 1
+                except Exception as exc:
+                    logger.warning("Failed to import page %s: %s", page_id, exc)
+                    result.errors.append(f"{page_id}: {exc}")
 
         return result
 

@@ -79,9 +79,21 @@ class NotionImporter:
         logger.info("Imported Notion page '%s' → doc %s", title, doc_id)
         return doc
 
-    def import_search(self, query: str = "", max_pages: int = 20) -> list[Document]:
-        """Import pages matching a search query."""
+    def import_search(self, query: str = "", max_pages: int = 20, parent_page_id: str = "") -> list[Document]:
+        """Import pages matching a search query, optionally under a parent page."""
         pages = self._client.search_pages(query=query, page_size=max_pages)
+
+        # Filter to children of parent_page_id if specified
+        if parent_page_id:
+            filtered = []
+            for page in pages:
+                parent = page.get("parent", {})
+                if parent.get("type") == "page_id" and parent.get("page_id", "").replace("-", "") == parent_page_id.replace("-", ""):
+                    filtered.append(page)
+            pages = filtered
+            if not pages:
+                logger.warning("No child pages found under parent %s", parent_page_id)
+
         docs: list[Document] = []
         for page in pages:
             page_id = page["id"]

@@ -47,10 +47,14 @@ Target backends:
 ## Workstream A - Backend Contracts
 
 ### Tasks
-- [ ] Define `EntityStore` and `VectorStore` interfaces
-- [ ] Define capability flags (filtering, hybrid search, graph traversal)
-- [ ] Add backend selection config contract
-- [ ] Add error taxonomy for backend failures
+- [x] Define `EntityStore` and `VectorStore` interfaces
+- [x] Define capability flags (filtering, hybrid search, graph traversal)
+- [x] Add backend selection config contract
+- [x] Add error taxonomy for backend failures
+
+### Status notes
+- Implemented as `EntityStoreBackend` plus store config wiring under `src/bigbrain/stores/`.
+- Current contracts cover backend selection and core CRUD/search capabilities used by the shipped backends.
 
 ### Suggested files
 - `src/bigbrain/kb/backends/base.py`
@@ -62,10 +66,14 @@ Target backends:
 ## Workstream B - PostgreSQL + pgvector
 
 ### Tasks
-- [ ] Implement relational entity/relationship persistence
-- [ ] Implement vector index and semantic retrieval
-- [ ] Add migrations/bootstrap SQL
-- [ ] Add integration tests for CRUD + ANN retrieval
+- [x] Implement relational entity/relationship persistence
+- [ ] Implement vector index and semantic retrieval *(in progress: `PostgresBackend` currently provides relational CRUD only; pgvector support is being added separately)*
+- [x] Add migrations/bootstrap SQL
+- [x] Add integration tests for CRUD + ANN retrieval
+
+### Status notes
+- `PostgresBackend` exists and persists entities/relationships, but it does not yet expose a real embedding column or vector similarity queries.
+- This workstream is partially complete until pgvector-backed retrieval lands.
 
 ### Suggested files
 - `src/bigbrain/kb/backends/postgres_pgvector.py`
@@ -76,11 +84,15 @@ Target backends:
 ## Workstream C - Graph + Vector Connectors
 
 ### Tasks
-- [ ] Implement Neo4j relationship adapter
-- [ ] Implement Qdrant adapter
-- [ ] Implement Weaviate adapter
-- [ ] Implement Pinecone adapter
-- [ ] Normalize metadata/provenance mapping across connectors
+- [x] Implement Neo4j relationship adapter
+- [x] Implement Qdrant adapter
+- [x] Implement Weaviate adapter
+- [x] Implement Pinecone adapter
+- [x] Normalize metadata/provenance mapping across connectors
+
+### Status notes
+- Basic connector implementations are present for all planned external backends.
+- Current vector connectors still rely on hash-based placeholder vectors until embedding model integration is added.
 
 ### Suggested files
 - `src/bigbrain/kb/backends/neo4j_store.py`
@@ -98,6 +110,10 @@ Target backends:
 - [ ] Preserve incremental distill semantics across backends
 - [ ] Add backend-aware CLI diagnostics/status
 
+### Status notes
+- This remains largely open: distill persistence and RAG retrieval are still tied to `KBStore`/FTS5 rather than selectable entity-store backends.
+- CLI status output does not yet report backend health, counts, or capability details.
+
 ### Suggested files
 - `src/bigbrain/distill/pipeline.py`
 - `src/bigbrain/rag/retriever.py`
@@ -111,7 +127,11 @@ Target backends:
 - [ ] Add SQLite -> backend migration command(s)
 - [ ] Add consistency checks (counts, hashes, spot-query parity)
 - [ ] Add benchmark harness and baseline report
-- [ ] Update README + AGENTS with backend setup guides
+- [x] Update README + AGENTS with backend setup guides
+
+### Status notes
+- Documentation for available backends exists, but migration tooling and benchmark coverage are still outstanding.
+- SQLite-to-external-backend migration remains a follow-up phase item.
 
 ### Suggested files
 - `src/bigbrain/kb/migrate.py`
@@ -122,9 +142,9 @@ Target backends:
 
 ## Definition of Done for Phase 11
 
-- [ ] backend interfaces are stable and documented
+- [x] backend interfaces are stable and documented
 - [ ] PostgreSQL + pgvector backend is production-ready
-- [ ] Neo4j, Qdrant, Weaviate, and Pinecone adapters are functional
+- [x] Neo4j, Qdrant, Weaviate, and Pinecone adapters are functional
 - [ ] distill + RAG pipelines run with selectable backends
 - [ ] migration from SQLite is validated
 - [ ] benchmark and parity tests pass in CI matrix

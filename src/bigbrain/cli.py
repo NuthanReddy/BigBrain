@@ -2095,13 +2095,23 @@ def _handle_notion(args: argparse.Namespace) -> int:
 
         query = args.query if hasattr(args, 'query') and args.query else ""
         max_pages = args.limit if hasattr(args, 'limit') else 20
+        parent = args.parent_page_id if hasattr(args, 'parent_page_id') and args.parent_page_id else ""
 
+        # Resolve parent page name to UUID
+        if parent:
+            parent = _resolve_notion_page_id(parent, cfg)
+            if not parent:
+                return 1
+
+        scope = f" under '{args.parent_page_id}'" if parent else ""
         suffix = f" matching: {query}" if query else ""
-        print(f"Importing Notion pages{suffix}...")
+        print(f"Importing Notion pages{scope}{suffix}...")
         with SyncEngine.from_config(cfg) as engine:
-            result = engine.import_pages(query=query, max_pages=max_pages)
+            result = engine.import_pages(query=query, max_pages=max_pages, parent_page_id=parent)
 
         print(f"  Imported: {result.imported}")
+        if result.skipped:
+            print(f"  Skipped:  {result.skipped}")
         if result.errors:
             print(f"  Errors:   {len(result.errors)}")
         return 0

@@ -698,11 +698,9 @@ class TestGitHubCopilotProvider:
 
     def test_is_available_no_token(self):
         """Returns False when no valid token is configured."""
-        p = self._make_provider(api_token="")
-        # Clear env to ensure no fallback
-        with patch.dict("os.environ", {}, clear=True):
-            import os
-            os.environ.pop("GITHUB_TOKEN", None)
+        with patch.dict("os.environ", {}, clear=True), \
+             patch("bigbrain.providers.github_auth._load_cached_token", return_value=""):
+            p = self._make_provider(api_token="")
             assert p.is_available() is False
 
     @patch("httpx.get")

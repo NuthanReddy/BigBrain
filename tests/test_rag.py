@@ -5,23 +5,26 @@ Covers: Retriever, context assembly, prompt building, RAGPipeline, RAGResponse.
 
 from __future__ import annotations
 
-import pytest
 from typing import Any
+from unittest.mock import MagicMock
 
+import pytest
+
+from bigbrain.distill.models import Entity
 from bigbrain.kb.models import Document, DocumentSection, SourceMetadata
 from bigbrain.kb.store import KBStore
-from bigbrain.rag.retriever import Retriever, RetrievedChunk
 from bigbrain.rag.context import assemble_context
+from bigbrain.rag.pipeline import RAGPipeline, RAGResponse
 from bigbrain.rag.prompts import (
+    build_explain_messages,
     build_qa_messages,
     build_qa_prompt,
     build_summarize_prompt,
-    build_explain_messages,
 )
-from bigbrain.rag.pipeline import RAGPipeline, RAGResponse
+from bigbrain.rag.retriever import Retriever, RetrievedChunk
 from bigbrain.providers.base import BaseProvider, ProviderResponse
 from bigbrain.providers.registry import ProviderRegistry
-from bigbrain.errors import ProviderError
+from bigbrain.stores.base import EntityStoreBackend
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +247,66 @@ class TestRetriever:
         assert len(chunks) > 0
         assert chunks[0].section_title == ""
         assert "no sections" in chunks[0].text.lower() or "content" in chunks[0].text.lower()
+        store.close()
+
+    def test_retrieve_hybrid_with_entity_store(self, tmp_path):
+        db = tmp_path / "ret.db"
+        store = KBStore(db)
+        doc_ids = _populate_store(store)
+        entity_store = MagicMock(spec=EntityStoreBackend)
+        entity_store.search_similar.return_value = [
+            Entity(
+                document_id=doc_ids[1],
+                name="Quicksort",
+                entity_type="algorithm",
+                description="Divide and conquer sort",
+            )
+        ]
+        retriever = Retriever(store, entity_store=entity_store)
+
+        chunks = retriever.retrieve_hybrid("binary search")
+
+        assert chunks
+        assert chunks[0].source_path == "sorting.txt"
+        assert any(c.retrieval_method == "vector" for c in chunks)
+        assert any(c.retrieval_method == "fts5" for c in chunks)
+        entity_store.search_similar.assert_called_once_with("binary search", limit=5)
+        store.close()
+
+    def test_retrieve_hybrid_without_entity_store(self, tmp_path):
+        db = tmp_path / "ret.db"
+        store = KBStore(db)
+        _populate_store(store)
+        retriever = Retriever(store)
+
+        hybrid_chunks = retriever.retrieve_hybrid("binary search")
+        fts_chunks = retriever.retrieve("binary search")
+
+        assert hybrid_chunks == fts_chunks
+        assert hybrid_chunks
+        assert all(c.retrieval_method == "fts5" for c in hybrid_chunks)
+        store.close()
+
+    def test_retrieve_hybrid_deduplication(self, tmp_path):
+        db = tmp_path / "ret.db"
+        store = KBStore(db)
+        doc_ids = _populate_store(store)
+        entity_store = MagicMock(spec=EntityStoreBackend)
+        entity_store.search_similar.return_value = [
+            Entity(
+                document_id=doc_ids[0],
+                name="BST",
+                entity_type="data_structure",
+                description="Binary search tree",
+            )
+        ]
+        retriever = Retriever(store, entity_store=entity_store)
+
+        chunks = retriever.retrieve_hybrid("binary search tree", max_chunks=10)
+
+        assert len(chunks) == 2
+        assert {c.source_path for c in chunks} == {"bst.txt"}
+        assert all(c.retrieval_method == "hybrid" for c in chunks)
         store.close()
 
 
@@ -479,6 +542,43 @@ class TestRAGPipeline:
         with RAGPipeline(store=store, registry=registry) as pipeline:
             response = pipeline.ask("binary search tree")
             assert response.answer
+
+    def test_ask_hybrid_mode(self, tmp_path, monkeypatch):
+        db = tmp_path / "rag.db"
+        store = KBStore(db)
+        _populate_store(store)
+        registry = _make_registry()
+        entity_store = MagicMock(spec=EntityStoreBackend)
+
+        pipeline = RAGPipeline(store=store, registry=registry, entity_store=entity_store)
+        hybrid_chunks = [
+            RetrievedChunk(
+                text="Hybrid retrieval context about binary search trees. " * 4,
+                source_title="Binary Search Trees",
+                source_path="bst.txt",
+                section_title="Definition",
+                retrieval_method="hybrid",
+            )
+        ]
+        called = {"hybrid": False}
+
+        def fake_retrieve_hybrid(*args, **kwargs):
+            called["hybrid"] = True
+            return hybrid_chunks
+
+        def fail_retrieve(*args, **kwargs):
+            raise AssertionError("retrieve() should not be used in hybrid mode")
+
+        monkeypatch.setattr(pipeline._retriever, "retrieve_hybrid", fake_retrieve_hybrid)
+        monkeypatch.setattr(pipeline._retriever, "retrieve", fail_retrieve)
+
+        response = pipeline.ask("binary search tree", use_hybrid=True)
+
+        assert called["hybrid"] is True
+        assert response.answer
+        assert response.sources == ["bst.txt"]
+        assert response.retrieval_method == "hybrid"
+        pipeline.close()
 
 
 # ---------------------------------------------------------------------------

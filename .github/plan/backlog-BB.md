@@ -1,4 +1,4 @@
-# BigBrain Implementation Backlog — BB-01 … BB-10
+# BigBrain Implementation Backlog — BB-01 … BB-14
 
 > Generated 2026-04-11 · Based on codebase audit of current `master`
 
@@ -122,6 +122,39 @@ BB-09 is independent but lower priority — scheduled after core stability work.
 | **Owner** | Tech Lead / Docs |
 | **Plan** | Create `CONTRIBUTING.md` (clone, venv, `pip install -e .[dev]`, `pytest`, `ruff check`, commit message format). Create `.pre-commit-config.yaml` (ruff, ruff-format, trailing-whitespace, end-of-file-fixer). Add "Development" section to `README.md`. |
 | **Acceptance** | New contributor can set up + test + lint in < 5 min following CONTRIBUTING · `pre-commit run --all-files` passes · README links to CONTRIBUTING |
+
+### BB-11 · Embedding model integration · **M**
+| Field | Value |
+|-------|-------|
+| **Current state** | External backends use hash-based placeholder vectors; no sentence-transformers or provider embedding path exists |
+| **Owner** | ML / Backend Dev |
+| **Plan** | Add a shared embedding abstraction with local sentence-transformers support and optional provider-based embeddings for cloud backends. Replace placeholder vectors in Postgres, Qdrant, Weaviate, and Pinecone flows. |
+| **Acceptance** | Real embeddings generated through one interface · vector-capable backends store/query true embedding arrays · placeholder hashing removed from production paths |
+
+### BB-12 · RAG-vector bridge · **M**
+| Field | Value |
+|-------|-------|
+| **Current state** | `src/bigbrain/rag/retriever.py` is hardcoded to KBStore FTS5 and never queries the selected entity store backend |
+| **Owner** | Backend Dev |
+| **Deps** | BB-11 |
+| **Plan** | Route RAG retrieval through the configured backend and support hybrid FTS5 + vector ranking, with backend capability checks and graceful fallback to keyword-only search. |
+| **Acceptance** | RAG pipeline uses selected backend when available · hybrid retrieval improves ranking over FTS5-only baseline · tests cover fallback and backend selection |
+
+### BB-13 · Entity store CLI diagnostics · **S**
+| Field | Value |
+|-------|-------|
+| **Current state** | `bigbrain status` reports KB stats only; it does not show entity store backend, health, counts, or vector capability info |
+| **Owner** | Backend Dev |
+| **Plan** | Extend CLI status output with backend name, health check, entity/relationship counts, and capability flags. Mask secrets while surfacing enough config to debug backend selection. |
+| **Acceptance** | `bigbrain status` shows entity store diagnostics for SQLite and external backends · failures are visible without a traceback · tests cover healthy and unavailable backends |
+
+### BB-14 · SQLite → external backend migration tooling · **M**
+| Field | Value |
+|-------|-------|
+| **Current state** | No command or library path exists to migrate distilled entities/relationships from SQLite to Postgres or other external backends |
+| **Owner** | Backend Dev |
+| **Plan** | Add migration commands and reusable helpers to export from SQLite, import into the selected backend, and validate counts/hashes/spot queries after migration. |
+| **Acceptance** | One command migrates SQLite data into a chosen backend · validation summary reports parity results · migration tests cover success and partial-failure handling |
 
 ---
 

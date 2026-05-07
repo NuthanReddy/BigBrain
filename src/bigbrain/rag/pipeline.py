@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from bigbrain.config import BigBrainConfig, load_config
 from bigbrain.kb.store import KBStore
 from bigbrain.logging_config import get_logger
-from bigbrain.providers.base import ProviderResponse
 from bigbrain.providers.registry import ProviderRegistry
 from bigbrain.rag.context import assemble_context
 from bigbrain.rag.prompts import (
@@ -16,7 +16,8 @@ from bigbrain.rag.prompts import (
     build_qa_prompt,
     build_summarize_prompt,
 )
-from bigbrain.rag.retriever import Retriever, RetrievedChunk
+from bigbrain.rag.retriever import Retriever
+from bigbrain.stores.base import EntityStoreBackend
 
 logger = get_logger(__name__)
 
@@ -24,6 +25,7 @@ logger = get_logger(__name__)
 @dataclass
 class RAGResponse:
     """Response from the RAG pipeline."""
+
     answer: str
     provider: str = ""
     model: str = ""
@@ -31,6 +33,7 @@ class RAGResponse:
     docs_searched: int = 0
     sources: list[str] = field(default_factory=list)  # unique source paths
     usage: dict[str, int] = field(default_factory=dict)
+    retrieval_method: str = "fts5"
 
 
 class RAGPipeline:
@@ -50,22 +53,50 @@ class RAGPipeline:
         response = pipeline.ask("Explain quicksort")
     """
 
-    def __init__(self, store: KBStore, registry: ProviderRegistry) -> None:
+    def __init__(
+        self,
+        store: KBStore,
+        registry: ProviderRegistry,
+        entity_store: EntityStoreBackend | None = None,
+    ) -> None:
         self._store = store
         self._registry = registry
-        self._retriever = Retriever(store)
+        self._entity_store = entity_store
+        self._retriever = Retriever(store, entity_store=entity_store)
 
     @classmethod
-    def from_config(cls) -> RAGPipeline:
+    def from_config(cls, config: BigBrainConfig | None = None) -> RAGPipeline:
         """Create pipeline from application config."""
-        from bigbrain.config import load_config
-        cfg = load_config()
-        store = KBStore(cfg.kb_db_path)
-        registry = ProviderRegistry.from_config(cfg.providers)
-        return cls(store=store, registry=registry)
+        if config is None:
+            config = load_config()
+
+        store = KBStore(config.kb_db_path)
+        registry = ProviderRegistry.from_config(config.providers)
+
+        entity_store = None
+        store_config = config.entity_store
+        non_default_store = store_config.backend.lower() != "sqlite" or any(
+            (
+                store_config.postgres_url,
+                store_config.neo4j_url,
+                store_config.neo4j_password,
+                store_config.qdrant_url,
+                store_config.weaviate_url,
+                store_config.pinecone_api_key,
+                store_config.pinecone_environment,
+            )
+        )
+        if non_default_store:
+            from bigbrain.stores.factory import create_entity_store
+
+            entity_store = create_entity_store(store_config, store)
+
+        return cls(store=store, registry=registry, entity_store=entity_store)
 
     def close(self) -> None:
         """Close the underlying store."""
+        if self._entity_store is not None:
+            self._entity_store.close()
         self._store.close()
 
     def __enter__(self) -> RAGPipeline:
@@ -83,6 +114,7 @@ class RAGPipeline:
         max_context_chars: int = 12000,
         model: str = "",
         use_chat: bool = True,
+        use_hybrid: bool = False,
     ) -> RAGResponse:
         """Answer a question using KB context + AI provider.
 
@@ -93,26 +125,33 @@ class RAGPipeline:
             max_context_chars: Max chars for context assembly
             model: Override AI model
             use_chat: Use chat API (True) or completion API (False)
+            use_hybrid: Use hybrid retrieval with the entity store when available
 
         Returns:
             RAGResponse with the answer and provenance
         """
-        # Step 1: Retrieve
-        chunks = self._retriever.retrieve(
-            question, max_docs=max_docs, max_chunks=max_chunks
-        )
+        retrieval_method = "hybrid" if use_hybrid and self._entity_store is not None else "fts5"
+
+        if use_hybrid:
+            chunks = self._retriever.retrieve_hybrid(
+                question, max_docs=max_docs, max_chunks=max_chunks
+            )
+        else:
+            chunks = self._retriever.retrieve(
+                question, max_docs=max_docs, max_chunks=max_chunks
+            )
+
         if not chunks:
             return RAGResponse(
                 answer="I couldn't find any relevant information in the knowledge base for your question.",
                 chunks_used=0,
                 docs_searched=0,
+                retrieval_method=retrieval_method,
             )
 
-        # Step 2: Assemble context
         context = assemble_context(chunks, max_chars=max_context_chars)
         sources = list(dict.fromkeys(c.source_path for c in chunks if c.source_path))
 
-        # Step 3: Generate
         if use_chat:
             messages = build_qa_messages(question, context)
             provider_resp = self._registry.chat(messages, model=model)
@@ -128,6 +167,7 @@ class RAGPipeline:
             docs_searched=max_docs,
             sources=sources,
             usage=provider_resp.usage,
+            retrieval_method=retrieval_method,
         )
 
     def summarize_document(self, doc_id: str, *, model: str = "") -> RAGResponse:

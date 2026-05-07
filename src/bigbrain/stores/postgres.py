@@ -18,6 +18,7 @@ class PostgresBackend(EntityStoreBackend):
     def __init__(self, connection_url: str) -> None:
         self._url = connection_url
         self._conn = None
+        self._has_vector = False
 
     def _get_conn(self):
         if self._conn is None or self._conn.closed:
@@ -25,10 +26,34 @@ class PostgresBackend(EntityStoreBackend):
 
             self._conn = psycopg.connect(self._url, autocommit=False)
             self._ensure_schema()
+            if self._has_vector:
+                try:
+                    from pgvector.psycopg import register_vector
+
+                    register_vector(self._conn)
+                except Exception as exc:
+                    logger.warning(
+                        "pgvector Python registration unavailable; falling back to text search: %s",
+                        exc,
+                    )
+                    self._has_vector = False
         return self._conn
 
     def _ensure_schema(self) -> None:
         conn = self._conn
+        try:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            conn.commit()
+            vector_available = True
+        except Exception as exc:
+            conn.rollback()
+            logger.warning(
+                "pgvector extension unavailable; falling back to text search: %s",
+                exc,
+            )
+            vector_available = False
+
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS bb_entities (
@@ -68,6 +93,37 @@ class PostgresBackend(EntityStoreBackend):
             )
         conn.commit()
 
+        if not vector_available:
+            self._has_vector = False
+            return
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "ALTER TABLE bb_entities ADD COLUMN IF NOT EXISTS embedding vector(384)"
+                )
+            conn.commit()
+            self._has_vector = True
+        except Exception as exc:
+            conn.rollback()
+            logger.warning(
+                "Failed to add pgvector embedding column; falling back to text search: %s",
+                exc,
+            )
+            self._has_vector = False
+            return
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_bb_entities_embedding "
+                    "ON bb_entities USING hnsw (embedding vector_cosine_ops)"
+                )
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            logger.warning("Failed to create pgvector HNSW index: %s", exc)
+
     @property
     def name(self) -> str:
         return "postgres"
@@ -85,24 +141,48 @@ class PostgresBackend(EntityStoreBackend):
         conn = self._get_conn()
         with conn.cursor() as cur:
             for e in entities:
-                cur.execute(
-                    "INSERT INTO bb_entities (id, document_id, name, entity_type, description, "
-                    "source_chunk_id, generated_by_provider, generated_by_model, metadata_json) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-                    "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, entity_type=EXCLUDED.entity_type, "
-                    "description=EXCLUDED.description, metadata_json=EXCLUDED.metadata_json",
-                    (
-                        e.id,
-                        e.document_id,
-                        e.name,
-                        e.entity_type,
-                        e.description,
-                        e.source_chunk_id,
-                        e.generated_by_provider,
-                        e.generated_by_model,
-                        json.dumps(e.metadata, default=str),
-                    ),
-                )
+                metadata_json = json.dumps(e.metadata, default=str)
+                if self._has_vector:
+                    embedding = self._text_to_vector(f"{e.name} {e.description}")
+                    cur.execute(
+                        "INSERT INTO bb_entities (id, document_id, name, entity_type, description, "
+                        "source_chunk_id, generated_by_provider, generated_by_model, embedding, metadata_json) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                        "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, entity_type=EXCLUDED.entity_type, "
+                        "description=EXCLUDED.description, embedding=EXCLUDED.embedding, "
+                        "metadata_json=EXCLUDED.metadata_json",
+                        (
+                            e.id,
+                            e.document_id,
+                            e.name,
+                            e.entity_type,
+                            e.description,
+                            e.source_chunk_id,
+                            e.generated_by_provider,
+                            e.generated_by_model,
+                            embedding,
+                            metadata_json,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        "INSERT INTO bb_entities (id, document_id, name, entity_type, description, "
+                        "source_chunk_id, generated_by_provider, generated_by_model, metadata_json) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                        "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, entity_type=EXCLUDED.entity_type, "
+                        "description=EXCLUDED.description, metadata_json=EXCLUDED.metadata_json",
+                        (
+                            e.id,
+                            e.document_id,
+                            e.name,
+                            e.entity_type,
+                            e.description,
+                            e.source_chunk_id,
+                            e.generated_by_provider,
+                            e.generated_by_model,
+                            metadata_json,
+                        ),
+                    )
         conn.commit()
         return len(entities)
 
@@ -115,20 +195,7 @@ class PostgresBackend(EntityStoreBackend):
                 "FROM bb_entities WHERE document_id=%s ORDER BY name",
                 (document_id,),
             )
-            return [
-                Entity(
-                    id=r[0],
-                    document_id=r[1],
-                    name=r[2],
-                    entity_type=r[3],
-                    description=r[4],
-                    source_chunk_id=r[5],
-                    generated_by_provider=r[6],
-                    generated_by_model=r[7],
-                    metadata=json.loads(r[8]),
-                )
-                for r in cur.fetchall()
-            ]
+            return [self._row_to_entity(r) for r in cur.fetchall()]
 
     def list_all_entities(
         self, *, entity_type: str = "", search: str = "", limit: int = 500
@@ -151,20 +218,33 @@ class PostgresBackend(EntityStoreBackend):
                 f"FROM bb_entities {where} ORDER BY entity_type,name LIMIT %s",
                 params,
             )
-            return [
-                Entity(
-                    id=r[0],
-                    document_id=r[1],
-                    name=r[2],
-                    entity_type=r[3],
-                    description=r[4],
-                    source_chunk_id=r[5],
-                    generated_by_provider=r[6],
-                    generated_by_model=r[7],
-                    metadata=json.loads(r[8]),
-                )
-                for r in cur.fetchall()
-            ]
+            return [self._row_to_entity(r) for r in cur.fetchall()]
+
+    def search_similar(
+        self, query: str, *, limit: int = 10, entity_type: str = ""
+    ) -> list[Entity]:
+        conn = self._get_conn()
+        if not self._has_vector:
+            return super().search_similar(
+                query, limit=limit, entity_type=entity_type
+            )
+
+        conditions = ["embedding IS NOT NULL"]
+        params: list[Any] = []
+        if entity_type:
+            conditions.append("entity_type=%s")
+            params.append(entity_type)
+        params.extend([self._text_to_vector(query), limit])
+        where = f"WHERE {' AND '.join(conditions)}"
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT id,document_id,name,entity_type,description,source_chunk_id,"
+                f"generated_by_provider,generated_by_model,metadata_json "
+                f"FROM bb_entities {where} "
+                f"ORDER BY embedding <=> %s::vector LIMIT %s",
+                params,
+            )
+            return [self._row_to_entity(r) for r in cur.fetchall()]
 
     def delete_entities(self, document_id: str) -> int:
         conn = self._get_conn()
@@ -240,3 +320,28 @@ class PostgresBackend(EntityStoreBackend):
     def close(self) -> None:
         if self._conn and not self._conn.closed:
             self._conn.close()
+
+    @staticmethod
+    def _text_to_vector(text: str, dim: int = 384) -> list[float]:
+        """Simple hash-based vector (placeholder — real impl uses sentence-transformers)."""
+        import hashlib
+
+        h = hashlib.sha512(text.encode()).digest()
+        raw = [float(b) / 255.0 for b in h]
+        while len(raw) < dim:
+            raw = raw + raw
+        return raw[:dim]
+
+    @staticmethod
+    def _row_to_entity(row: tuple[Any, ...]) -> Entity:
+        return Entity(
+            id=row[0],
+            document_id=row[1],
+            name=row[2],
+            entity_type=row[3],
+            description=row[4],
+            source_chunk_id=row[5],
+            generated_by_provider=row[6],
+            generated_by_model=row[7],
+            metadata=json.loads(row[8]),
+        )
